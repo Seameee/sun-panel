@@ -12,7 +12,7 @@ import {
   securityTotpDisable as securityTotpDisableApi,
   securityTotpFinish,
 } from '@/api/security'
-import { buildTimeString, copyToClipboard } from '@/utils/cmn'
+import { copyToClipboard, timeFormat } from '@/utils/cmn'
 import { apiRespErrMsg } from '@/utils/request/apiMessage'
 import {
   classifyWebAuthnError,
@@ -37,8 +37,6 @@ const totpEnable = ref({
   show: false,
   step: 'password' as 'password' | 'verify',
   loading: false,
-  password: '',
-  code: '',
   flowId: '',
   secret: '',
   otpauthUrl: '',
@@ -47,17 +45,13 @@ const totpEnable = ref({
 const totpDisable = ref({
   show: false,
   loading: false,
-  password: '',
-  code: '',
 })
 
 const passkeyCreate = ref({
   show: false,
   step: 'password' as 'password' | 'waiting',
   loading: false,
-  password: '',
   name: '',
-  totpCode: '',
 })
 
 const passkeyDelete = ref({
@@ -65,8 +59,6 @@ const passkeyDelete = ref({
   loading: false,
   id: '' as string | number,
   name: '',
-  password: '',
-  totpCode: '',
 })
 
 // 本地生成二维码，密钥不出浏览器
@@ -91,16 +83,20 @@ const qr = computed(() => {
   }
 })
 
-const onlyDigits = (value: string) => /^\d*$/.test(value)
+function formValues(event: SubmitEvent) {
+  const fields = new FormData(event.currentTarget as HTMLFormElement)
+  return {
+    password: String(fields.get('password') ?? ''),
+    code: String(fields.get('otp') ?? '').replace(/[\s-]/g, ''),
+  }
+}
 
-function normalizeCode(value: string) {
-  return (value || '').replace(/[\s-]/g, '')
+function validCode(code: string) {
+  return /^\d{6}$/.test(code)
 }
 
 function formatTime(value?: string) {
-  if (!value)
-    return ''
-  return buildTimeString(value)
+  return value && Number.isFinite(Date.parse(value)) ? timeFormat(value) : ''
 }
 
 function resetTotpEnable() {
@@ -108,24 +104,22 @@ function resetTotpEnable() {
     show: false,
     step: 'password',
     loading: false,
-    password: '',
-    code: '',
-    flowId: '',
+        flowId: '',
     secret: '',
     otpauthUrl: '',
   }
 }
 
 function resetTotpDisable() {
-  totpDisable.value = { show: false, loading: false, password: '', code: '' }
+  totpDisable.value = { show: false, loading: false }
 }
 
 function resetPasskeyCreate() {
-  passkeyCreate.value = { show: false, step: 'password', loading: false, password: '', name: '', totpCode: '' }
+  passkeyCreate.value = { show: false, step: 'password', loading: false, name: '' }
 }
 
 function resetPasskeyDelete() {
-  passkeyDelete.value = { show: false, loading: false, id: '', name: '', password: '', totpCode: '' }
+  passkeyDelete.value = { show: false, loading: false, id: '', name: '' }
 }
 
 function openTotpEnable() {
@@ -220,18 +214,20 @@ async function copySecret() {
     ms.error(t('apps.userInfo.security.copyFail'))
 }
 
-async function submitTotpPassword() {
-  if (!totpEnable.value.password) {
+async function submitTotpPassword(event: SubmitEvent) {
+  if (totpEnable.value.loading)
+    return
+  const { password } = formValues(event)
+  if (!password) {
     ms.warning(t('apps.userInfo.security.passwordRequired'))
     return
   }
   totpEnable.value.loading = true
   try {
-    const { data } = await securityTotpBegin<Security.TotpBeginResponse>(totpEnable.value.password)
+    const { data } = await securityTotpBegin<Security.TotpBeginResponse>(password)
     totpEnable.value.flowId = data.flowId
     totpEnable.value.secret = data.secret
     totpEnable.value.otpauthUrl = data.otpauthUrl
-    totpEnable.value.password = ''
     totpEnable.value.step = 'verify'
   }
   catch (error) {
@@ -242,9 +238,11 @@ async function submitTotpPassword() {
   }
 }
 
-async function submitTotpVerify() {
-  const code = normalizeCode(totpEnable.value.code)
-  if (code.length !== 6) {
+async function submitTotpVerify(event: SubmitEvent) {
+  if (totpEnable.value.loading)
+    return
+  const { code } = formValues(event)
+  if (!validCode(code)) {
     ms.warning(t('apps.userInfo.security.codeInvalid'))
     return
   }
@@ -263,19 +261,21 @@ async function submitTotpVerify() {
   }
 }
 
-async function submitTotpDisable() {
-  if (!totpDisable.value.password) {
+async function submitTotpDisable(event: SubmitEvent) {
+  if (totpDisable.value.loading)
+    return
+  const { password, code } = formValues(event)
+  if (!password) {
     ms.warning(t('apps.userInfo.security.passwordRequired'))
     return
   }
-  const code = normalizeCode(totpDisable.value.code)
-  if (code.length !== 6) {
+  if (!validCode(code)) {
     ms.warning(t('apps.userInfo.security.codeInvalid'))
     return
   }
   totpDisable.value.loading = true
   try {
-    await securityTotpDisableApi(totpDisable.value.password, code)
+    await securityTotpDisableApi(password, code)
     ms.success(t('apps.userInfo.security.totpDisableSuccess'))
     resetTotpDisable()
     await loadStatus()
@@ -288,16 +288,16 @@ async function submitTotpDisable() {
   }
 }
 
-async function submitPasskeyCreate() {
-  if (passkeyCreate.value.step !== 'password')
+async function submitPasskeyCreate(event: SubmitEvent) {
+  if (passkeyCreate.value.loading || passkeyCreate.value.step !== 'password')
     return
-  if (!passkeyCreate.value.password) {
+  const { password, code: totpCode } = formValues(event)
+  if (!password) {
     ms.warning(t('apps.userInfo.security.passwordRequired'))
     return
   }
   const name = passkeyCreate.value.name.trim() || t('apps.userInfo.security.passkeyDefaultName')
-  const totpCode = normalizeCode(passkeyCreate.value.totpCode)
-  if (status.value.totpEnabled && totpCode.length !== 6) {
+  if (status.value.totpEnabled && !validCode(totpCode)) {
     ms.warning(t('apps.userInfo.security.codeInvalid'))
     return
   }
@@ -305,12 +305,10 @@ async function submitPasskeyCreate() {
   passkeyCreate.value.loading = true
   try {
     const { data } = await securityPasskeyBegin<Security.PublicKeyFlowResponse>(
-      passkeyCreate.value.password,
+      password,
       name,
       status.value.totpEnabled ? totpCode : undefined,
     )
-    passkeyCreate.value.password = ''
-    passkeyCreate.value.totpCode = ''
 
     const options = toCreationOptions(data.publicKey)
     passkeyCreate.value.step = 'waiting'
@@ -332,13 +330,15 @@ async function submitPasskeyCreate() {
   }
 }
 
-async function submitPasskeyDelete() {
-  if (!passkeyDelete.value.password) {
+async function submitPasskeyDelete(event: SubmitEvent) {
+  if (passkeyDelete.value.loading)
+    return
+  const { password, code: totpCode } = formValues(event)
+  if (!password) {
     ms.warning(t('apps.userInfo.security.passwordRequired'))
     return
   }
-  const totpCode = normalizeCode(passkeyDelete.value.totpCode)
-  if (status.value.totpEnabled && totpCode.length !== 6) {
+  if (status.value.totpEnabled && !validCode(totpCode)) {
     ms.warning(t('apps.userInfo.security.codeInvalid'))
     return
   }
@@ -347,7 +347,7 @@ async function submitPasskeyDelete() {
   try {
     await securityPasskeyDeleteApi(
       passkeyDelete.value.id,
-      passkeyDelete.value.password,
+      password,
       status.value.totpEnabled ? totpCode : undefined,
     )
     ms.success(t('apps.userInfo.security.passkeyDeleteSuccess'))
@@ -441,17 +441,17 @@ onMounted(() => {
       v-model:show="totpEnable.show" size="small" preset="card" style="width: 420px"
       :title="t('apps.userInfo.security.totpEnableTitle')" @update:show="handleTotpEnableShow"
     >
-      <div v-if="totpEnable.step === 'password'">
+      <form v-if="totpEnable.step === 'password'" id="totp-enable-password" @submit.prevent="submitTotpPassword">
         <div class="text-slate-500 text-xs mb-2">
           {{ t('apps.userInfo.security.totpPasswordTip') }}
         </div>
-        <NInput
-          v-model:value="totpEnable.password" type="password" show-password-on="click"
-          :placeholder="t('common.password')" @keydown.enter="submitTotpPassword"
-        />
-      </div>
+        <input
+          class="security-input" name="password" type="password" autocomplete="current-password"
+          :placeholder="t('common.password')" :aria-label="t('common.password')"
+        >
+      </form>
 
-      <div v-else>
+      <form v-else id="totp-enable-verify" @submit.prevent="submitTotpVerify">
         <div class="text-slate-500 text-xs">
           {{ t('apps.userInfo.security.totpScanTip') }}
         </div>
@@ -484,22 +484,22 @@ onMounted(() => {
           <div class="text-slate-500 text-xs mb-1">
             {{ t('apps.userInfo.security.codeLabel') }}
           </div>
-          <NInput
-            v-model:value="totpEnable.code" :maxlength="6" inputmode="numeric" :allow-input="onlyDigits"
-            :placeholder="t('apps.userInfo.security.codePlaceholder')" @keydown.enter="submitTotpVerify"
-          />
+          <input
+            class="security-input" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+            :placeholder="t('apps.userInfo.security.codePlaceholder')" :aria-label="t('apps.userInfo.security.codeLabel')"
+          >
         </div>
 
         <div class="text-slate-500 text-xs mt-2">
           {{ t('apps.userInfo.security.totpReaddTip') }}
         </div>
-      </div>
+      </form>
 
       <template #footer>
         <div class="float-right">
           <NButton
             size="small" type="primary" :loading="totpEnable.loading"
-            @click="totpEnable.step === 'password' ? submitTotpPassword() : submitTotpVerify()"
+            attr-type="submit" :form="totpEnable.step === 'password' ? 'totp-enable-password' : 'totp-enable-verify'"
           >
             {{ totpEnable.step === 'password' ? t('common.continue') : t('common.save') }}
           </NButton>
@@ -512,22 +512,24 @@ onMounted(() => {
       v-model:show="totpDisable.show" size="small" preset="card" style="width: 420px"
       :title="t('apps.userInfo.security.totpDisableTitle')" @update:show="handleTotpDisableShow"
     >
-      <div class="text-slate-500 text-xs mb-2">
-        {{ t('apps.userInfo.security.totpDisableTip') }}
-      </div>
-      <NInput
-        v-model:value="totpDisable.password" type="password" show-password-on="click"
-        :placeholder="t('common.password')"
-      />
-      <div class="mt-2">
-        <NInput
-          v-model:value="totpDisable.code" :maxlength="6" inputmode="numeric" :allow-input="onlyDigits"
-          :placeholder="t('apps.userInfo.security.codePlaceholder')" @keydown.enter="submitTotpDisable"
-        />
-      </div>
+      <form id="totp-disable" @submit.prevent="submitTotpDisable">
+        <div class="text-slate-500 text-xs mb-2">
+          {{ t('apps.userInfo.security.totpDisableTip') }}
+        </div>
+        <input
+          class="security-input" name="password" type="password" autocomplete="current-password"
+          :placeholder="t('common.password')" :aria-label="t('common.password')"
+        >
+        <div class="mt-2">
+          <input
+            class="security-input" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+            :placeholder="t('apps.userInfo.security.codePlaceholder')" :aria-label="t('apps.userInfo.security.codeLabel')"
+          >
+        </div>
+      </form>
       <template #footer>
         <div class="float-right">
-          <NButton size="small" type="error" :loading="totpDisable.loading" @click="submitTotpDisable">
+          <NButton size="small" type="error" :loading="totpDisable.loading" attr-type="submit" form="totp-disable">
             {{ t('apps.userInfo.security.totpDisable') }}
           </NButton>
         </div>
@@ -539,7 +541,7 @@ onMounted(() => {
       v-model:show="passkeyCreate.show" size="small" preset="card" style="width: 420px"
       :title="t('apps.userInfo.security.passkeyAdd')" @update:show="handlePasskeyCreateShow"
     >
-      <div v-if="passkeyCreate.step === 'password'">
+      <form v-if="passkeyCreate.step === 'password'" id="passkey-create" @submit.prevent="submitPasskeyCreate">
         <div class="text-slate-500 text-xs mb-2">
           {{ t('apps.userInfo.security.passkeyAddTip') }}
         </div>
@@ -553,20 +555,20 @@ onMounted(() => {
         <div class="text-slate-500 text-xs mb-1 mt-2">
           {{ t('common.password') }}
         </div>
-        <NInput
-          v-model:value="passkeyCreate.password" type="password" show-password-on="click"
-          :placeholder="t('common.password')"
-        />
+        <input
+          class="security-input" name="password" type="password" autocomplete="current-password"
+          :placeholder="t('common.password')" :aria-label="t('common.password')"
+        >
         <div v-if="status.totpEnabled" class="mt-2">
           <div class="text-slate-500 text-xs mb-1">
             {{ t('apps.userInfo.security.codeLabel') }}
           </div>
-          <NInput
-            v-model:value="passkeyCreate.totpCode" :maxlength="6" inputmode="numeric" :allow-input="onlyDigits"
-            :placeholder="t('apps.userInfo.security.codePlaceholder')"
-          />
+          <input
+            class="security-input" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+            :placeholder="t('apps.userInfo.security.codePlaceholder')" :aria-label="t('apps.userInfo.security.codeLabel')"
+          >
         </div>
-      </div>
+      </form>
       <div v-else class="flex flex-col items-center py-4">
         <NSpin size="medium" />
         <div class="text-slate-500 text-xs mt-2">
@@ -577,7 +579,7 @@ onMounted(() => {
         <div class="float-right">
           <NButton
             size="small" type="primary" :loading="passkeyCreate.loading"
-            :disabled="passkeyCreate.step === 'waiting'" @click="submitPasskeyCreate"
+            :disabled="passkeyCreate.step === 'waiting'" attr-type="submit" form="passkey-create"
           >
             {{ t('apps.userInfo.security.passkeyAdd') }}
           </NButton>
@@ -590,25 +592,27 @@ onMounted(() => {
       v-model:show="passkeyDelete.show" size="small" preset="card" style="width: 420px"
       :title="t('apps.userInfo.security.passkeyDelete')" @update:show="handlePasskeyDeleteShow"
     >
-      <div class="text-slate-500 text-xs mb-2">
-        {{ t('apps.userInfo.security.passkeyDeleteTip', { name: passkeyDelete.name || t('apps.userInfo.security.passkeyDefaultName') }) }}
-      </div>
-      <NInput
-        v-model:value="passkeyDelete.password" type="password" show-password-on="click"
-        :placeholder="t('common.password')"
-      />
-      <div v-if="status.totpEnabled" class="mt-2">
-        <div class="text-slate-500 text-xs mb-1">
-          {{ t('apps.userInfo.security.codeLabel') }}
+      <form id="passkey-delete" @submit.prevent="submitPasskeyDelete">
+        <div class="text-slate-500 text-xs mb-2">
+          {{ t('apps.userInfo.security.passkeyDeleteTip', { name: passkeyDelete.name || t('apps.userInfo.security.passkeyDefaultName') }) }}
         </div>
-        <NInput
-          v-model:value="passkeyDelete.totpCode" :maxlength="6" inputmode="numeric" :allow-input="onlyDigits"
-          :placeholder="t('apps.userInfo.security.codePlaceholder')"
-        />
-      </div>
+        <input
+          class="security-input" name="password" type="password" autocomplete="current-password"
+          :placeholder="t('common.password')" :aria-label="t('common.password')"
+        >
+        <div v-if="status.totpEnabled" class="mt-2">
+          <div class="text-slate-500 text-xs mb-1">
+            {{ t('apps.userInfo.security.codeLabel') }}
+          </div>
+          <input
+            class="security-input" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+            :placeholder="t('apps.userInfo.security.codePlaceholder')" :aria-label="t('apps.userInfo.security.codeLabel')"
+          >
+        </div>
+      </form>
       <template #footer>
         <div class="float-right">
-          <NButton size="small" type="error" :loading="passkeyDelete.loading" @click="submitPasskeyDelete">
+          <NButton size="small" type="error" :loading="passkeyDelete.loading" attr-type="submit" form="passkey-delete">
             {{ t('common.delete') }}
           </NButton>
         </div>
@@ -616,3 +620,21 @@ onMounted(() => {
     </RoundCardModal>
   </NCard>
 </template>
+
+<style scoped>
+.security-input {
+  display: block;
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--n-border-color, #80808059);
+  border-radius: 3px;
+  padding: 0 12px;
+  background: transparent;
+  color: inherit;
+}
+
+.security-input:focus-visible {
+  outline: 2px solid var(--n-primary-color, #18a058);
+  outline-offset: 1px;
+}
+</style>

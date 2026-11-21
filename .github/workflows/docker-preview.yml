@@ -1,13 +1,14 @@
-name: Publish Docker preview
+name: Publish Docker image
 
 on:
   push:
     tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v*-preview.*'
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing Git preview tag (vX.Y.Z-preview.N)
+        description: Existing Git tag (vX.Y.Z or vX.Y.Z-preview.N)
         required: true
         type: string
 
@@ -18,29 +19,59 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
+    concurrency:
+      # Stable runs share a lane for :latest; previews only contend with the same tag.
+      group: docker-publish-${{ contains(inputs.tag || github.ref_name, '-preview.') && format('preview-{0}', inputs.tag || github.ref_name) || 'stable' }}
+      cancel-in-progress: false
     env:
-      PREVIEW_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - name: Verify preview tag format
+      - name: Verify release tag format
+        id: release
         shell: bash
-        run: '[[ "$PREVIEW_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]]'
+        run: |
+          if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" != refs/heads/master ]]; then
+              echo 'Stable releases must be dispatched from master.' >&2
+              exit 1
+            fi
+            echo 'stable=true' >> "$GITHUB_OUTPUT"
+          elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]]; then
+            echo 'stable=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Invalid release tag.' >&2
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ env.PREVIEW_TAG }}
+          ref: refs/tags/${{ env.RELEASE_TAG }}
       - name: Check version and set image name
         id: version
         shell: bash
         run: |
+          revision=$(git rev-parse HEAD)
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            test "$revision" = "$(git rev-parse --verify "$GITHUB_SHA^{commit}")"
+          fi
           IFS='|' read -r code version <<< "$(cat service/assets/version)"
-          [[ "$code" =~ ^[0-9]+$ && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]]
-          test "v$version" = "$PREVIEW_TAG"
+          [[ "$code" =~ ^[0-9]+$ ]]
+          test "v$version" = "$RELEASE_TAG"
           {
             echo "version=$version"
-            echo "revision=$(git rev-parse HEAD)"
-            echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:$PREVIEW_TAG"
+            echo "revision=$revision"
+            echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:$RELEASE_TAG"
           } >> "$GITHUB_OUTPUT"
+      - name: Require stable tag at the tip of master
+        if: steps.release.outputs.stable == 'true'
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin refs/heads/master
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
+            echo 'Stable tag must point to the current tip of master.' >&2
+            exit 1
+          fi
       - uses: docker/setup-buildx-action@v3
-      - name: Build preview image
+      - name: Build production image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -75,7 +106,27 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish versioned image
+      - name: Publish versioned image and stable latest
+        shell: bash
         env:
           IMAGE: ${{ steps.version.outputs.image }}
-        run: docker push "$IMAGE"
+          STABLE: ${{ steps.release.outputs.stable }}
+        run: |
+          at_master_tip() {
+            git fetch --no-tags --depth=1 origin refs/heads/master &&
+              [[ "$(git rev-parse HEAD)" == "$(git rev-parse FETCH_HEAD)" ]]
+          }
+          if [[ "$STABLE" == true ]] && ! at_master_tip; then
+            echo 'Could not confirm the stable tag is still at the tip of master; nothing was pushed.' >&2
+            exit 1
+          fi
+          docker push "$IMAGE"
+          if [[ "$STABLE" == true ]]; then
+            if ! at_master_tip; then
+              echo 'Could not confirm the stable tag is still at the tip of master; the versioned image was published, but latest was not updated.' >&2
+              exit 1
+            fi
+            latest="${IMAGE%:*}:latest"
+            docker tag "$IMAGE" "$latest"
+            docker push "$latest"
+          fi

@@ -2,6 +2,12 @@
 
 Sun-Panel 是一个自托管导航面板，可以分组管理网站和服务，为同一张卡片设置内外网地址，也可以用作浏览器首页。这个分支以官方 [v1.3.0](https://github.com/hslr-s/sun-panel/tree/v1.3.0)（`31fd128`）为基础，沿用 [MIT 许可](LICENSE)。
 
+## v1.3.1
+
+- 动态验证码输入框支持密码管理器的 `one-time-code` 自动填充。Passkey 创建和删除流程中的动态验证码也使用相同的标准字段。
+- Passkey 创建时间按本地时间显示。
+- 稳定版镜像发布到 GHCR，并同步更新 `latest` 标签。
+
 ## v1.3.1-preview.4
 
 - Passkey 支持通过 `SUN_PANEL_WEBAUTHN_ORIGIN` 配置。Compose 显式使用 UID/GID `10001:10001`。
