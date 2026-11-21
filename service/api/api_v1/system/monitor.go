@@ -3,6 +3,7 @@ package system
 import (
 	"sun-panel/api/api_v1/common/apiData/systemApiStructs"
 	"sun-panel/api/api_v1/common/apiReturn"
+	"sun-panel/api/api_v1/common/base"
 	"sun-panel/global"
 	"sun-panel/lib/monitor"
 	"time"
@@ -25,10 +26,11 @@ func (a *MonitorApi) GetAll(c *gin.Context) {
 }
 
 func (a *MonitorApi) GetCpuState(c *gin.Context) {
-	if v, ok := global.SystemMonitor.Get(global.SystemMonitor_CPU_INFO); ok {
-		global.Logger.Debugln("读取缓存的的CPU信息")
-		apiReturn.SuccessData(c, v)
-		return
+	if cached, ok := global.SystemMonitor.Get(global.SystemMonitor_CPU_INFO); ok {
+		if info, ok := cached.(monitor.CPUInfo); ok {
+			apiReturn.SuccessData(c, cpuResponse(c, info))
+			return
+		}
 	}
 	cpuInfo, err := monitor.GetCPUInfo()
 
@@ -38,7 +40,22 @@ func (a *MonitorApi) GetCpuState(c *gin.Context) {
 	}
 	// 缓存
 	global.SystemMonitor.Set(global.SystemMonitor_CPU_INFO, cpuInfo, cacheSecond*time.Second)
-	apiReturn.SuccessData(c, cpuInfo)
+	apiReturn.SuccessData(c, cpuResponse(c, cpuInfo))
+}
+
+func cpuResponse(c *gin.Context, info monitor.CPUInfo) any {
+	visitMode, _ := c.Get(base.GIN_GET_VISIT_MODE)
+	if visitMode != base.VISIT_MODE_PUBLIC {
+		return info
+	}
+	var average float64
+	for _, value := range info.Usages {
+		average += value
+	}
+	if len(info.Usages) > 0 {
+		average /= float64(len(info.Usages))
+	}
+	return gin.H{"usages": []float64{average}}
 }
 
 func (a *MonitorApi) GetMemonyState(c *gin.Context) {

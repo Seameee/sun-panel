@@ -3,6 +3,8 @@ package system
 type ApiSystem struct {
 	About           About
 	LoginApi        LoginApi
+	SecurityApi     SecurityApi
+	CaptchaApi      CaptchaApi
 	UserApi         UserApi
 	FileApi         FileApi
 	NoticeApi       NoticeApi

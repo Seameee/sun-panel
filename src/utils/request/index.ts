@@ -15,6 +15,8 @@ export interface HttpOption {
   signal?: GenericAbortSignal
   beforeRequest?: () => void
   afterRequest?: () => void
+  // 为 true 时，请求失败不打印完整错误对象（避免请求体中的密码、动态口令等进入控制台）
+  maskErrorLog?: boolean
 }
 
 export interface Response<T = any> {
@@ -26,7 +28,7 @@ export interface Response<T = any> {
 }
 
 function http<T = any>(
-  { url, data, method, headers, onDownloadProgress, signal, beforeRequest, afterRequest }: HttpOption,
+  { url, data, method, headers, onDownloadProgress, signal, beforeRequest, afterRequest, maskErrorLog }: HttpOption,
 ) {
   const authStore = useAuthStore()
   const appStore = useAppStore()
@@ -69,7 +71,7 @@ function http<T = any>(
       return res.data
     }
 
-    if (!apiRespErrMsg(res.data))
+    if (maskErrorLog || !apiRespErrMsg(res.data))
       return Promise.reject(res.data)
     else
       return res.data
@@ -77,6 +79,8 @@ function http<T = any>(
 
   const failHandler = (error: Response<Error>) => {
     afterRequest?.()
+    if (maskErrorLog)
+      return Promise.reject({ code: -1, msg: t('common.networkError') })
     message.error(t('common.networkError'), {
       duration: 50000,
       closable: true,
@@ -92,7 +96,7 @@ function http<T = any>(
   if (!headers)
     headers = {}
 
-  headers.token = authStore.token
+  headers.token ??= authStore.token
   headers.lang = appStore.language
   return method === 'GET'
     ? request.get(url, { params, signal, onDownloadProgress }).then(successHandler, failHandler)
@@ -114,13 +118,14 @@ export function get<T = any>(
 }
 
 export function post<T = any>(
-  { url, data, method = 'POST', headers, onDownloadProgress, signal, beforeRequest, afterRequest }: HttpOption,
+  { url, data, method = 'POST', headers, onDownloadProgress, signal, beforeRequest, afterRequest, maskErrorLog }: HttpOption,
 ): Promise<Response<T>> {
   return http<T>({
     url,
     method,
     data,
     headers,
+    maskErrorLog,
     onDownloadProgress,
     signal,
     beforeRequest,

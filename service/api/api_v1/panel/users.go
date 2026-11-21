@@ -7,8 +7,8 @@ import (
 	"sun-panel/api/api_v1/common/apiReturn"
 	"sun-panel/api/api_v1/common/base"
 	"sun-panel/global"
-	"sun-panel/lib/cmn"
 	"sun-panel/lib/cmn/systemSetting"
+	"sun-panel/lib/security"
 	"sun-panel/models"
 
 	"github.com/gin-gonic/gin"
@@ -42,9 +42,18 @@ func (a UsersApi) Create(c *gin.Context) {
 		return
 	}
 
+	if security.ValidateNewPassword(param.Password) != nil {
+		apiReturn.ErrorByCode(c, 1106)
+		return
+	}
+	passwordHash, err := security.HashPassword(param.Password)
+	if err != nil {
+		apiReturn.ErrorDatabase(c, "")
+		return
+	}
 	mUser := models.User{
 		Username:  strings.TrimSpace(param.Username),
-		Password:  cmn.PasswordEncryption(param.Password),
+		Password:  passwordHash,
 		Name:      param.Name,
 		HeadImage: param.HeadImage,
 		Status:    1,
@@ -161,7 +170,16 @@ func (a UsersApi) Update(c *gin.Context) {
 
 	// 密码不为默认“-”空，修改密码
 	if param.Password != "-" {
-		param.Password = cmn.PasswordEncryption(param.Password)
+		if security.ValidateNewPassword(param.Password) != nil {
+			apiReturn.ErrorByCode(c, 1106)
+			return
+		}
+		passwordHash, err := security.HashPassword(param.Password)
+		if err != nil {
+			apiReturn.ErrorDatabase(c, "")
+			return
+		}
+		param.Password = passwordHash
 		allowField = append(allowField, "Password")
 	}
 
@@ -218,7 +236,7 @@ func (a UsersApi) GetList(c *gin.Context) {
 		db = db.Where("name LIKE ? OR username LIKE ?", "%"+param.Keyword+"%", "%"+param.Keyword+"%")
 	}
 
-	if err := db.Omit("Password").Limit(param.Limit).Offset((param.Page - 1) * param.Limit).Find(&list).Limit(-1).Offset(-1).Count(&count).Error; err != nil {
+	if err := db.Omit("Password", "Token").Limit(param.Limit).Offset((param.Page - 1) * param.Limit).Find(&list).Limit(-1).Offset(-1).Count(&count).Error; err != nil {
 		apiReturn.ErrorDatabase(c, err.Error())
 		return
 	}

@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import DOMPurify from 'dompurify'
 import { VueDraggable } from 'vue-draggable-plus'
 import { NBackTop, NButton, NButtonGroup, NDropdown, NModal, NSkeleton, NSpin, useDialog, useMessage } from 'naive-ui'
 import { nextTick, onMounted, ref } from 'vue'
 import { AppIcon, AppStarter, EditItem } from './components'
 import { Clock, SearchBox, SystemMonitor } from '@/components/deskModule'
 import { SvgIcon } from '@/components/common'
-import { deletes, getListByGroupId, saveSort } from '@/api/panel/itemIcon'
+import { deletes, getListByGroupId, saveSort, saveSortBatch } from '@/api/panel/itemIcon'
 import { getList as getGroupList } from '@/api/panel/itemIconGroup'
 
 import { setTitle, updateLocalUserInfo } from '@/utils/cmn'
@@ -34,7 +35,6 @@ const windowShow = ref<boolean>(false)
 const windowSrc = ref<string>('')
 const windowTitle = ref<string>('')
 
-const windowIframeRef = ref(null)
 const windowIframeIsLoad = ref<boolean>(false)
 
 const dropdownMenuX = ref(0)
@@ -47,6 +47,58 @@ const settingModalShow = ref(false)
 
 const items = ref<ItemGroup[]>([])
 const filterItems = ref<ItemGroup[]>([])
+const sortEditMode = ref(false)
+const sortSaving = ref(false)
+const loadingGroups = ref(true)
+const panelCardDragGroup = { name: 'panel-card', pull: true, put: true }
+let originalLayout: ItemGroup[] | undefined
+
+function enterSortEditMode() {
+  if (loadingGroups.value || !items.value.length || items.value.some(group => !Array.isArray(group.items) || group.sortStatus))
+    return
+  dropdownShow.value = false
+  originalLayout = items.value.map(group => ({ ...group, items: group.items?.slice() }))
+  filterItems.value = items.value
+  sortEditMode.value = true
+}
+
+function cancelSortEditMode() {
+  if (sortSaving.value || !originalLayout)
+    return
+  items.value = originalLayout
+  filterItems.value = items.value
+  originalLayout = undefined
+  sortEditMode.value = false
+}
+
+async function saveSortEditMode() {
+  if (sortSaving.value)
+    return
+  sortSaving.value = true
+  try {
+    const result = await saveSortBatch(items.value.map(group => ({
+      itemIconGroupId: group.id!,
+      itemIds: group.items!.map(item => item.id!),
+    })))
+    if (result.code !== 0)
+      throw new Error(result.msg)
+    for (const group of items.value) {
+      group.items?.forEach((item, index) => {
+        item.itemIconGroupId = group.id
+        item.sort = index + 1
+      })
+    }
+    originalLayout = undefined
+    sortEditMode.value = false
+    ms.success(t('common.saveSuccess'))
+  }
+  catch {
+    ms.error(t('common.saveFail'))
+  }
+  finally {
+    sortSaving.value = false
+  }
+}
 
 function openPage(openMethod: number, url: string, title?: string) {
   switch (openMethod) {
@@ -69,6 +121,9 @@ function openPage(openMethod: number, url: string, title?: string) {
 }
 
 function handleItemClick(itemGroupIndex: number, item: Panel.ItemInfo) {
+  if (sortEditMode.value)
+    return
+
   if (items.value[itemGroupIndex] && items.value[itemGroupIndex].sortStatus) {
     handleEditItem(item)
     return
@@ -88,27 +143,27 @@ function handWindowIframeIdLoad(payload: Event) {
   windowIframeIsLoad.value = false
 }
 
-function getList() {
-  // 获取组数据
-  getGroupList<Common.ListResponse<ItemGroup[]>>().then(({ code, data, msg }) => {
-    if (code === 0)
-      items.value = data.list
-    for (let i = 0; i < data.list.length; i++) {
-      const element = data.list[i]
-      if (element.id)
-        updateItemIconGroupByNet(i, element.id)
-    }
+async function getList() {
+  loadingGroups.value = true
+  try {
+    const { data } = await getGroupList<Common.ListResponse<ItemGroup[]>>()
+    items.value = data.list
     filterItems.value = items.value
-    // console.log(items)
-  })
+    await Promise.all(items.value.map((group, index) => group.id && updateItemIconGroupByNet(index, group.id)))
+  }
+  catch {
+    ms.error(t('common.unknownError'))
+  }
+  finally {
+    loadingGroups.value = false
+  }
 }
 
-// 从后端获取组下面的图标
-function updateItemIconGroupByNet(itemIconGroupIndex: number, itemIconGroupId: number) {
-  getListByGroupId<Common.ListResponse<Panel.ItemInfo[]>>(itemIconGroupId).then((res) => {
-    if (res.code === 0)
-      items.value[itemIconGroupIndex].items = res.data.list
-  })
+async function updateItemIconGroupByNet(itemIconGroupIndex: number, itemIconGroupId: number) {
+  const { data } = await getListByGroupId<Common.ListResponse<Panel.ItemInfo[]>>(itemIconGroupId)
+  const group = items.value[itemIconGroupIndex]
+  if (group?.id === itemIconGroupId)
+    group.items = data.list
 }
 
 function handleRightMenuSelect(key: string | number) {
@@ -159,6 +214,10 @@ function handleRightMenuSelect(key: string | number) {
 }
 
 function handleContextMenu(e: MouseEvent, itemGroupIndex: number, item: Panel.ItemInfo) {
+  if (sortEditMode.value) {
+    e.preventDefault()
+    return
+  }
   if (items.value[itemGroupIndex] && items.value[itemGroupIndex].sortStatus)
     return
 
@@ -270,6 +329,9 @@ onMounted(() => {
 
 // 前端搜索过滤
 function itemFrontEndSearch(keyword?: string) {
+  if (sortEditMode.value)
+    return
+
   keyword = keyword?.trim()
   if (keyword !== '' && panelState.panelConfig.searchBoxSearchIcon) {
     const filteredData = ref<ItemGroup[]>([])
@@ -381,7 +443,7 @@ function handleAddItem(itemIconGroupId?: number) {
           <div
             v-for="(itemGroup, itemGroupIndex) in filterItems" :key="itemGroupIndex"
             class="item-list mt-[50px]"
-            :class="itemGroup.sortStatus ? 'shadow-2xl border shadow-[0_0_30px_10px_rgba(0,0,0,0.3)]  p-[10px] rounded-2xl' : ''"
+            :class="(sortEditMode || itemGroup.sortStatus) ? 'shadow-2xl border shadow-[0_0_30px_10px_rgba(0,0,0,0.3)]  p-[10px] rounded-2xl' : ''"
             @mouseenter="handleSetHoverStatus(itemGroupIndex, true)"
             @mouseleave="handleSetHoverStatus(itemGroupIndex, false)"
           >
@@ -391,7 +453,7 @@ function handleAddItem(itemIconGroupId?: number) {
                 {{ itemGroup.title }}
               </span>
               <div
-                v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN"
+                v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN && !sortEditMode"
                 class="group-buttons ml-2 delay-100 transition-opacity flex"
                 :class="itemGroup.hoverStatus ? 'opacity-100' : 'opacity-0'"
               >
@@ -408,14 +470,16 @@ function handleAddItem(itemIconGroupId?: number) {
             <div v-if="panelState.panelConfig.iconStyle === PanelPanelConfigStyleEnum.info">
               <div v-if="itemGroup.items">
                 <VueDraggable
-                  v-model="itemGroup.items" item-key="sort" :animation="300"
+                  v-model="itemGroup.items" :animation="180"
+                  draggable=".sortable-panel-card" :force-fallback="sortEditMode" :fallback-on-body="true"
+                  :group="sortEditMode ? panelCardDragGroup : undefined"
                   class="icon-info-box"
                   filter=".not-drag"
-                  :disabled="!itemGroup.sortStatus"
+                  :disabled="sortSaving || (!sortEditMode && !itemGroup.sortStatus)"
                 >
-                  <div v-for="item, index in itemGroup.items" :key="index" :title="item.description" @contextmenu="(e) => handleContextMenu(e, itemGroupIndex, item)">
+                  <div v-for="item in itemGroup.items" :key="item.id" class="sortable-panel-card" :title="item.description" @contextmenu="(e) => handleContextMenu(e, itemGroupIndex, item)">
                     <AppIcon
-                      :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
+                      :class="(sortEditMode || itemGroup.sortStatus) ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="item"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
                       :icon-text-info-hide-description="panelState.panelConfig.iconTextInfoHideDescription || false"
@@ -425,9 +489,10 @@ function handleAddItem(itemIconGroupId?: number) {
                     />
                   </div>
 
-                  <div v-if="itemGroup.items.length === 0" class="not-drag">
+                  <div v-if="sortEditMode && itemGroup.items.length === 0" class="not-drag sort-empty-hint" aria-hidden="true" />
+                  <div v-else-if="itemGroup.items.length === 0" class="not-drag">
                     <AppIcon
-                      :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
+                      :class="(sortEditMode || itemGroup.sortStatus) ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="{ icon: { itemType: 3, text: 'subway:add' }, title: t('common.add'), url: '', openMethod: 0 }"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
                       :icon-text-info-hide-description="panelState.panelConfig.iconTextInfoHideDescription || false"
@@ -444,15 +509,17 @@ function handleAddItem(itemIconGroupId?: number) {
             <div v-if="panelState.panelConfig.iconStyle === PanelPanelConfigStyleEnum.icon">
               <div v-if="itemGroup.items">
                 <VueDraggable
-                  v-model="itemGroup.items" item-key="sort" :animation="300"
+                  v-model="itemGroup.items" :animation="180"
+                  draggable=".sortable-panel-card" :force-fallback="sortEditMode" :fallback-on-body="true"
+                  :group="sortEditMode ? panelCardDragGroup : undefined"
                   class="icon-small-box"
 
                   filter=".not-drag"
-                  :disabled="!itemGroup.sortStatus"
+                  :disabled="sortSaving || (!sortEditMode && !itemGroup.sortStatus)"
                 >
-                  <div v-for="item, index in itemGroup.items" :key="index" :title="item.description" @contextmenu="(e) => handleContextMenu(e, itemGroupIndex, item)">
+                  <div v-for="item in itemGroup.items" :key="item.id" class="sortable-panel-card" :title="item.description" @contextmenu="(e) => handleContextMenu(e, itemGroupIndex, item)">
                     <AppIcon
-                      :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
+                      :class="(sortEditMode || itemGroup.sortStatus) ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="item"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
                       :icon-text-info-hide-description="!panelState.panelConfig.iconTextInfoHideDescription"
@@ -462,7 +529,8 @@ function handleAddItem(itemIconGroupId?: number) {
                     />
                   </div>
 
-                  <div v-if="itemGroup.items.length === 0" class="not-drag">
+                  <div v-if="sortEditMode && itemGroup.items.length === 0" class="not-drag sort-empty-hint" aria-hidden="true" />
+                  <div v-else-if="itemGroup.items.length === 0" class="not-drag">
                     <AppIcon
                       class="cursor-pointer"
                       :item-info="{ icon: { itemType: 3, text: 'subway:add' }, title: $t('common.add'), url: '', openMethod: 0 }"
@@ -492,7 +560,7 @@ function handleAddItem(itemIconGroupId?: number) {
             </div>
           </div>
         </div>
-        <div class="mt-5 footer" v-html="panelState.panelConfig.footerHtml" />
+        <div class="mt-5 footer" v-html="DOMPurify.sanitize(panelState.panelConfig.footerHtml ?? '')" />
       </div>
     </div>
 
@@ -505,6 +573,17 @@ function handleAddItem(itemIconGroupId?: number) {
     <!-- 悬浮按钮 -->
     <div class="fixed-element shadow-[0_0_10px_2px_rgba(0,0,0,0.2)]">
       <NButtonGroup vertical>
+        <template v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN">
+          <NButton v-if="!sortEditMode" color="#2a2a2a6b" :disabled="loadingGroups" :aria-label="t('common.edit')" :title="t('common.edit')" @click="enterSortEditMode">
+            <template #icon>
+              <SvgIcon class="text-white font-xl" icon="basil-edit-solid" />
+            </template>
+          </NButton>
+          <template v-else>
+            <NButton color="#2a2a2a6b" :loading="sortSaving" :aria-label="t('common.saveSort')" :title="t('common.saveSort')" @click="saveSortEditMode">✓</NButton>
+            <NButton color="#2a2a2a6b" :disabled="sortSaving" :aria-label="t('common.cancel')" :title="t('common.cancel')" @click="cancelSortEditMode">×</NButton>
+          </template>
+        </template>
         <!-- 网络模式切换按钮组 -->
         <NButton
           v-if="panelState.networkMode === PanelStateNetworkModeEnum.lan && panelState.panelConfig.netModeChangeButtonShow" color="#2a2a2a6b"
@@ -542,7 +621,7 @@ function handleAddItem(itemIconGroupId?: number) {
     </div>
 
     <NBackTop
-      :listen-to="() => scrollContainerRef"
+      :listen-to="scrollContainerRef"
       :right="10"
       :bottom="10"
       style="background-color:transparent;border: none;box-shadow: none;"
@@ -580,7 +659,7 @@ function handleAddItem(itemIconGroupId?: number) {
           <NSkeleton height="180px" width="100%" class="mt-[20px] rounded-lg" />
         </div>
         <iframe
-          v-show="!windowIframeIsLoad" id="windowIframeId" ref="windowIframeRef" :src="windowSrc"
+          v-show="!windowIframeIsLoad" id="windowIframeId" :src="windowSrc"
           class="w-full h-full" frameborder="0" @load="handWindowIframeIdLoad"
         />
       </div>
@@ -625,6 +704,14 @@ html {
 
 .app-icon-text-shadow {
   text-shadow: 2px 2px 5px rgb(0, 0, 0);
+}
+
+.sort-empty-hint {
+  grid-column: 1 / -1;
+  min-height: 3rem;
+  border: 1px dashed white;
+  border-radius: 6px;
+  pointer-events: none;
 }
 
 .fixed-element {

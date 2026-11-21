@@ -1,7 +1,7 @@
 package panel
 
 import (
-	"math"
+	"errors"
 	"sun-panel/api/api_v1/common/apiData/commonApiStructs"
 	"sun-panel/api/api_v1/common/apiReturn"
 	"sun-panel/api/api_v1/common/base"
@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ItemIconGroup struct {
@@ -26,19 +27,26 @@ func (a *ItemIconGroup) Edit(c *gin.Context) {
 	}
 
 	req.UserId = userInfo.ID
+	req.User = models.User{}
 
 	if req.ID != 0 {
-		// 修改
-		updateField := []string{"IconJson", "Icon", "Title", "Url", "LanUrl", "Description", "OpenMethod", "GroupId", "UserId"}
+		updateFields := []string{"Icon", "Title", "Description"}
 		if req.Sort != 0 {
-			updateField = append(updateField, "Sort")
+			updateFields = append(updateFields, "Sort")
 		}
-		global.Db.Model(&models.ItemIconGroup{}).
-			Select(updateField).
-			Where("id=?", req.ID).Updates(&req)
-	} else {
-		// 创建
-		global.Db.Create(&req)
+		result := global.Db.Model(&models.ItemIconGroup{}).Select(updateFields).
+			Where("id = ? AND user_id = ?", req.ID, userInfo.ID).Updates(&req)
+		if result.Error != nil {
+			apiReturn.ErrorDatabase(c, result.Error.Error())
+			return
+		}
+		if result.RowsAffected == 0 {
+			apiReturn.ErrorNoAccess(c)
+			return
+		}
+	} else if err := global.Db.Omit(clause.Associations).Create(&req).Error; err != nil {
+		apiReturn.ErrorDatabase(c, err.Error())
+		return
 	}
 
 	apiReturn.SuccessData(c, req)
@@ -49,27 +57,25 @@ func (a *ItemIconGroup) GetList(c *gin.Context) {
 	userInfo, _ := base.GetCurrentUserInfo(c)
 	groups := []models.ItemIconGroup{}
 
+	visitMode, _ := c.Get(base.GIN_GET_VISIT_MODE)
 	err := global.Db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Order("sort ,created_at").Where("user_id=?", userInfo.ID).Find(&groups).Error; err != nil {
-			apiReturn.ErrorDatabase(c, err.Error())
 			return err
 		}
 
-		// 判断分组是否为空，为空将自动创建默认分组
-		if len(groups) == 0 {
+		// 只为登录用户初始化默认分组。
+		if len(groups) == 0 && visitMode != base.VISIT_MODE_PUBLIC {
 			defaultGroup := models.ItemIconGroup{
 				Title:  "APP",
 				UserId: userInfo.ID,
 				Icon:   "material-symbols:ad-group-outline",
 			}
 			if err := tx.Create(&defaultGroup).Error; err != nil {
-				apiReturn.ErrorDatabase(c, err.Error())
 				return err
 			}
 
 			// 并将当前账号下所有无分组的图标更新到当前组
 			if err := tx.Model(&models.ItemIcon{}).Where("user_id=?", userInfo.ID).Update("item_icon_group_id", defaultGroup.ID).Error; err != nil {
-				apiReturn.ErrorDatabase(c, err.Error())
 				return err
 			}
 
@@ -97,31 +103,32 @@ func (a *ItemIconGroup) Deletes(c *gin.Context) {
 	}
 	userInfo, _ := base.GetCurrentUserInfo(c)
 
-	var count int64
-	if err := global.Db.Model(&models.ItemIconGroup{}).Where(" user_id=?", userInfo.ID).Count(&count).Error; err != nil {
-		apiReturn.ErrorDatabase(c, err.Error())
-		return
-	} else {
-		if math.Abs(float64(len(req.Ids))-float64(count)) < 1 {
-			apiReturn.ErrorCode(c, 1201, "At least one must be retained", nil)
-			return
-		}
-
-	}
-
+	errLastGroup := errors.New("at least one group must be retained")
 	txErr := global.Db.Transaction(func(tx *gorm.DB) error {
-		mitemIcon := models.ItemIcon{}
-		if err := tx.Delete(&models.ItemIconGroup{}, "id in ? AND user_id=?", req.Ids, userInfo.ID).Error; err != nil {
+		var groupIDs []uint
+		if err := tx.Model(&models.ItemIconGroup{}).Where("user_id = ? AND id IN ?", userInfo.ID, req.Ids).Pluck("id", &groupIDs).Error; err != nil {
 			return err
 		}
-
-		if err := mitemIcon.DeleteByItemIconGroupIds(tx, userInfo.ID, req.Ids); err != nil {
+		if len(groupIDs) == 0 {
+			return nil
+		}
+		var count int64
+		if err := tx.Model(&models.ItemIconGroup{}).Where("user_id = ?", userInfo.ID).Count(&count).Error; err != nil {
 			return err
 		}
-
-		return nil
+		if int64(len(groupIDs)) >= count {
+			return errLastGroup
+		}
+		if err := tx.Delete(&models.ItemIconGroup{}, "id IN ? AND user_id = ?", groupIDs, userInfo.ID).Error; err != nil {
+			return err
+		}
+		return (&models.ItemIcon{}).DeleteByItemIconGroupIds(tx, userInfo.ID, groupIDs)
 	})
 
+	if errors.Is(txErr, errLastGroup) {
+		apiReturn.ErrorCode(c, 1201, "At least one must be retained", nil)
+		return
+	}
 	if txErr != nil {
 		apiReturn.ErrorDatabase(c, txErr.Error())
 		return

@@ -1,0 +1,81 @@
+name: Publish Docker preview
+
+on:
+  push:
+    tags:
+      - 'v*-preview.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Git preview tag (vX.Y.Z-preview.N)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Verify preview tag format
+        shell: bash
+        run: '[[ "$PREVIEW_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]]'
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.PREVIEW_TAG }}
+      - name: Check version and set image name
+        id: version
+        shell: bash
+        run: |
+          IFS='|' read -r code version <<< "$(cat service/assets/version)"
+          [[ "$code" =~ ^[0-9]+$ && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]]
+          test "v$version" = "$PREVIEW_TAG"
+          {
+            echo "version=$version"
+            echo "revision=$(git rev-parse HEAD)"
+            echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:$PREVIEW_TAG"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build preview image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ steps.version.outputs.image }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.version.outputs.revision }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+      - name: Verify fresh container and version
+        shell: bash
+        env:
+          IMAGE: ${{ steps.version.outputs.image }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker run --detach --name sun-panel-smoke -p 127.0.0.1:13002:3002 "$IMAGE"
+          trap 'docker logs sun-panel-smoke; docker rm -f sun-panel-smoke' EXIT
+          for ((attempt = 0; attempt < 30; attempt++)); do
+            if curl --fail --silent --show-error --max-time 3 \
+              --request POST http://127.0.0.1:13002/api/about \
+              | jq -e --arg version "$VERSION" '.code == 0 and .data.versionName == $version'; then
+              curl --fail --silent --show-error http://127.0.0.1:13002/ > /dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish versioned image
+        env:
+          IMAGE: ${{ steps.version.outputs.image }}
+        run: docker push "$IMAGE"

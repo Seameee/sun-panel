@@ -10,7 +10,7 @@ const defaultLocale = 'zh-CN'
 const i18n = createI18n({
   locale: defaultLocale,
   fallbackLocale: defaultLocale,
-  allowComposition: true,
+  legacy: false,
   messages: {
     'en-US': enUS,
     // 'ko-KR': koKR,
@@ -25,7 +25,7 @@ export const t = i18n.global.t
 // 避免循环依赖appstore(authstore)language此处暂时先使用any
 // 后面有时间调整
 export function setLocale(locale: any) {
-  i18n.global.locale = locale
+  i18n.global.locale.value = locale
 }
 
 export function setupI18n(app: App) {

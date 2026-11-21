@@ -21,4 +21,10 @@ var ErrorCodeMap = map[int]string{
 
 	1400: "Parameter format error", // 参数格式错误
 
+	1101: "Authenticator code required",
+	1102: "Invalid verification code",
+	1103: "Invalid image verification code",
+	1104: "Too many authentication attempts. Try again in five minutes",
+	1105: "Change the original default password before continuing",
+	1106: "Password must be 8–200 bytes and differ from the original default",
 }

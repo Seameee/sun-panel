@@ -1,7 +1,9 @@
 **/node_modules
-*/node_modules
-node_modules
-Dockerfile
-.*
-*/.*
-!.env
+.git
+.env*
+dist
+service/assets/bindata.go
+conf
+database
+uploads
+runtime

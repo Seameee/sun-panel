@@ -1,176 +1,110 @@
 package siteFavicon
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path"
-	"regexp"
-	"strconv"
 	"strings"
-	"sun-panel/lib/cmn"
-	"time"
+	"sun-panel/lib/safefile"
+	"sun-panel/lib/safeurl"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
-func IsHTTPURL(url string) bool {
-	httpPattern := `^(http://|https://|//)`
-	match, err := regexp.MatchString(httpPattern, url)
-	if err != nil {
-		return false
-	}
-	return match
-}
+const (
+	maxHTMLBytes = 512 << 10
+	maxIconBytes = 1 << 20
+	userAgent    = "Sun-Panel favicon fetcher"
+)
 
-func GetOneFaviconURL(urlStr string) (string, error) {
-	iconURLs, err := getFaviconURL(urlStr)
+var client = safeurl.NewClient(0)
+
+func DownloadSiteFavicon(ctx context.Context, pageURL, uploadDir string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, safeurl.DefaultTimeout)
+	defer cancel()
+	page, finalURL, err := get(ctx, pageURL, maxHTMLBytes)
 	if err != nil {
 		return "", err
 	}
-
-	for _, v := range iconURLs {
-		// 标准的路径地址
-		if IsHTTPURL(v) {
-			return v, nil
-		} else {
-			urlInfo, _ := url.Parse(urlStr)
-			fullUrl := urlInfo.Scheme + "://" + urlInfo.Host + "/" + strings.TrimPrefix(v, "/")
-			return fullUrl, nil
-		}
+	iconURL, err := findIconURL(finalURL, page)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("not found ico")
+	data, _, err := get(ctx, iconURL, maxIconBytes)
+	if err != nil {
+		return "", err
+	}
+	ext, ok := safefile.DetectImageExt(data[:min(len(data), safefile.SniffLen)])
+	if !ok {
+		return "", errors.New("favicon is not a supported image")
+	}
+	return safefile.SaveImage(uploadDir, ext, data)
 }
 
-// 获取远程文件的大小
-func GetRemoteFileSize(url string) (int64, error) {
-	resp, err := http.Head(url)
+func get(ctx context.Context, rawURL string, limit int64) ([]byte, *url.URL, error) {
+	req, err := safeurl.NewRequest(http.MethodGet, rawURL)
 	if err != nil {
-		return 0, err
+		return nil, nil, err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := safeurl.Do(client, req.WithContext(ctx))
+	if err != nil {
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
-
-	// 检查HTTP响应状态
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("HTTP request failed, status code: %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("unexpected HTTP status %d", resp.StatusCode)
 	}
-
-	// 获取Content-Length字段，即文件大小
-	size := resp.ContentLength
-	return size, nil
+	if resp.ContentLength > limit {
+		return nil, nil, safeurl.ErrBodyTooLarge
+	}
+	data, err := safeurl.ReadAllLimited(resp.Body, limit)
+	return data, resp.Request.URL, err
 }
 
-// 下载图片
-func DownloadImage(url, savePath string, maxSize int64) (*os.File, error) {
-	// 获取远程文件大小
-	fileSize, err := GetRemoteFileSize(url)
+func findIconURL(base *url.URL, page []byte) (string, error) {
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(page))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-
-	// 判断文件大小是否在阈值内
-	if fileSize > maxSize {
-		return nil, fmt.Errorf("文件太大，不下载。大小：%d字节", fileSize)
-	}
-
-	// 发送HTTP GET请求获取图片数据
-	response, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-
-	// 检查HTTP响应状态
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP request failed, status code: %d", response.StatusCode)
-	}
-
-	urlFileName := path.Base(url)
-	fileExt := path.Ext(url)
-	fileName := cmn.Md5(fmt.Sprintf("%s%s", urlFileName, time.Now().String())) + fileExt
-
-	destination := savePath + "/" + fileName
-
-	// 创建本地文件用于保存图片
-	file, err := os.Create(destination)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// 将图片数据写入本地文件
-	_, err = io.Copy(file, response.Body)
-	if err != nil {
-		return nil, err
-	}
-	return file, nil
-}
-
-func GetOneFaviconURLAndUpload(urlStr string) (string, bool) {
-	//www.iqiyipic.com/pcwimg/128-128-logo.png
-	iconURLs, err := getFaviconURL(urlStr)
-	if err != nil {
-		return "", false
-	}
-
-	for _, v := range iconURLs {
-		// 标准的路径地址
-		if IsHTTPURL(v) {
-			return v, true
-		} else {
-			urlInfo, _ := url.Parse(urlStr)
-			fullUrl := urlInfo.Scheme + "://" + urlInfo.Host + "/" + strings.TrimPrefix(v, "/")
-			return fullUrl, true
-		}
-	}
-	return "", false
-}
-
-func getFaviconURL(url string) ([]string, error) {
-	var icons []string
-	icons = make([]string, 0)
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return icons, err
-	}
-
-	// 设置User-Agent头字段，模拟浏览器请求
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return icons, err
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return icons, errors.New("HTTP request failed with status code " + strconv.Itoa(resp.StatusCode))
-	}
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return icons, err
-	}
-
-	// 查找所有link标签，筛选包含rel属性为"icon"的标签
-	doc.Find("link").Each(func(i int, s *goquery.Selection) {
+	var icon string
+	doc.Find("link[href]").EachWithBreak(func(_ int, s *goquery.Selection) bool {
 		rel, _ := s.Attr("rel")
 		href, _ := s.Attr("href")
-
-		if strings.Contains(rel, "icon") && href != "" {
-			// fmt.Println(href)
-			icons = append(icons, href)
+		for _, value := range strings.Fields(strings.ToLower(rel)) {
+			switch value {
+			case "icon", "apple-touch-icon", "apple-touch-icon-precomposed", "mask-icon":
+				if resolved, err := resolveIconURL(base, href); err == nil {
+					icon = resolved
+					return false
+				}
+			}
 		}
+		return true
 	})
-
-	if len(icons) == 0 {
-		return icons, errors.New("favicon not found on the page")
+	if icon == "" {
+		return "", errors.New("favicon not found on the page")
 	}
+	return icon, nil
+}
 
-	return icons, nil
+func resolveIconURL(base *url.URL, href string) (string, error) {
+	href = strings.TrimSpace(href)
+	if href == "" || base == nil {
+		return "", safeurl.ErrInvalidURL
+	}
+	ref, err := url.Parse(href)
+	if err != nil {
+		return "", err
+	}
+	abs := base.ResolveReference(ref)
+	abs.Fragment = ""
+	validated, err := safeurl.Parse(abs.String())
+	if err != nil {
+		return "", err
+	}
+	return validated.String(), nil
 }

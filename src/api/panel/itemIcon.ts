@@ -48,3 +48,7 @@ export function getSiteFavicon<T>(url: string) {
     data: { url },
   })
 }
+
+export function saveSortBatch(groups: { itemIconGroupId: number; itemIds: number[] }[]) {
+  return post({ url: '/panel/itemIcon/saveSortBatch', data: { groups } })
+}

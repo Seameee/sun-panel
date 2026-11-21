@@ -5,6 +5,7 @@ import { post } from '@/utils/request'
 export function login<T>(data: Login.LoginReqest) {
   return post<T>({
     url: '/login',
+    maskErrorLog: true,
     data,
   })
 }

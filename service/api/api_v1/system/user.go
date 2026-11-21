@@ -6,6 +6,7 @@ import (
 	"sun-panel/api/api_v1/common/base"
 	"sun-panel/global"
 	"sun-panel/lib/cmn"
+	"sun-panel/lib/security"
 	"sun-panel/models"
 
 	"github.com/gin-gonic/gin"
@@ -27,19 +28,14 @@ func (a *UserApi) GetInfo(c *gin.Context) {
 	})
 }
 
+func publicUser(user models.User) gin.H {
+	return gin.H{"id": user.ID, "userId": user.ID, "headImage": user.HeadImage,
+		"name": user.Name, "role": user.Role, "username": user.Username}
+}
+
 func (a *UserApi) GetAuthInfo(c *gin.Context) {
 	userInfo, _ := base.GetCurrentUserInfo(c)
-	visitMode := base.GetCurrentVisitMode(c)
-	user := models.User{}
-	user.ID = userInfo.ID
-	user.HeadImage = userInfo.HeadImage
-	user.Name = userInfo.Name
-	user.Role = userInfo.Role
-	user.Username = userInfo.Username
-	apiReturn.SuccessData(c, gin.H{
-		"user":      user,
-		"visitMode": visitMode,
-	})
+	apiReturn.SuccessData(c, gin.H{"user": publicUser(userInfo), "visitMode": base.GetCurrentVisitMode(c)})
 }
 
 // 修改资料
@@ -90,27 +86,34 @@ func (a *UserApi) UpdatePasssword(c *gin.Context) {
 		return
 	}
 	userInfo, _ := base.GetCurrentUserInfo(c)
-	mUser := models.User{}
-	if v, err := mUser.GetUserInfoByUid(userInfo.ID); err != nil {
-		apiReturn.ErrorParamFomat(c, err.Error())
-		return
-	} else {
-		if v.Password != cmn.PasswordEncryption(params.OldPassword) {
-			// 旧密码不正确
-			apiReturn.ErrorByCode(c, 1007)
-			return
-		}
-	}
-	res := global.Db.Model(&models.User{}).Where("id", userInfo.ID).Updates(map[string]interface{}{
-		"password": cmn.PasswordEncryption(params.NewPassword),
-		"token":    "",
-	})
-	if res.Error != nil {
-		apiReturn.ErrorDatabase(c, res.Error.Error())
+	if security.ValidateNewPassword(params.NewPassword) != nil {
+		apiReturn.ErrorByCode(c, 1106)
 		return
 	}
-	// 删除token
+	if !allowPasswordAttempt(c, userInfo.Username) {
+		return
+	}
+	if valid, _ := security.VerifyPassword(params.OldPassword, userInfo.Password); !valid {
+		apiReturn.ErrorByCode(c, 1007)
+		return
+	}
+	hash, err := security.HashPassword(params.NewPassword)
+	if err != nil {
+		apiReturn.ErrorDatabase(c, "")
+		return
+	}
+	result := global.Db.Model(&models.User{}).Where("id = ? AND password = ? AND token = ?", userInfo.ID, userInfo.Password, userInfo.Token).
+		Updates(map[string]interface{}{"password": hash, "token": ""})
+	if result.Error != nil {
+		apiReturn.ErrorDatabase(c, "")
+		return
+	}
+	if result.RowsAffected != 1 {
+		apiReturn.ErrorByCode(c, 1001)
+		return
+	}
 	global.UserToken.Delete(userInfo.Token)
+	global.CUserToken.Delete(c.GetHeader("token"))
 	apiReturn.Success(c)
 }
 

@@ -20,6 +20,12 @@ func (a *ModuleConfigApi) GetByName(c *gin.Context) {
 		return
 	}
 
+	visitMode, _ := c.Get(base.GIN_GET_VISIT_MODE)
+	public := visitMode == base.VISIT_MODE_PUBLIC
+	if public && req.Name != "systemMonitor" && req.Name != "deskModuleSearchBox" {
+		apiReturn.ErrorNoAccess(c)
+		return
+	}
 	userInfo, _ := base.GetCurrentUserInfo(c)
 
 	mCfg := models.ModuleConfig{}
@@ -27,10 +33,37 @@ func (a *ModuleConfigApi) GetByName(c *gin.Context) {
 		apiReturn.ErrorDatabase(c, err.Error())
 		return
 	} else {
+		if public && req.Name == "systemMonitor" {
+			cfg = publicMonitorConfig(cfg)
+		}
 		apiReturn.SuccessData(c, cfg)
-		return
 	}
+}
 
+func publicMonitorConfig(config map[string]any) map[string]any {
+	list, _ := config["list"].([]any)
+	cards := make([]map[string]any, 0, len(list))
+	for _, entry := range list {
+		card, _ := entry.(map[string]any)
+		monitorType, _ := card["monitorType"].(string)
+		if monitorType != "cpu" && monitorType != "memory" {
+			continue
+		}
+		style := make(map[string]any)
+		if fields, ok := card["extendParam"].(map[string]any); ok {
+			for _, name := range []string{"progressColor", "progressRailColor", "color", "backgroundColor"} {
+				if value, ok := fields[name].(string); ok {
+					style[name] = value
+				}
+			}
+		}
+		public := map[string]any{"monitorType": monitorType, "extendParam": style}
+		if description, ok := card["description"].(string); ok {
+			public["description"] = description
+		}
+		cards = append(cards, public)
+	}
+	return map[string]any{"list": cards}
 }
 
 func (a *ModuleConfigApi) Save(c *gin.Context) {

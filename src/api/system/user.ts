@@ -25,9 +25,11 @@ export function updateInfo<T>(name: string) {
   })
 }
 
-export function updatePassword<T>(oldPassword: string, newPassword: string) {
+export function updatePassword<T>(oldPassword: string, newPassword: string, token?: string) {
   return post<T>({
     url: '/user/updatePassword',
+    headers: token ? { token } : undefined,
+    maskErrorLog: true,
     data: { newPassword, oldPassword },
   })
 }

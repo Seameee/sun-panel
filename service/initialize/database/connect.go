@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"sun-panel/lib/cmn"
+	"sun-panel/lib/security"
 	"sun-panel/models"
 	"time"
 
@@ -97,6 +98,7 @@ func GetLogger() logger.Interface {
 	return logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer（日志输出的目标，前缀和日志包含的内容——译者注）
 		logger.Config{
+			ParameterizedQueries:      true,
 			SlowThreshold:             time.Second, // 慢 SQL 阈值
 			LogLevel:                  logger.Warn, // 日志级别
 			IgnoreRecordNotFoundError: true,        // 忽略ErrRecordNotFound（记录未找到）错误
@@ -123,9 +125,20 @@ func CreateDatabase(driver string, db *gorm.DB) error {
 		&models.File{},
 		&models.ItemIconGroup{},
 		&models.ModuleConfig{},
+		&models.SecurityTotp{},
+		&models.SecurityPasskey{},
 	)
 
-	return err
+	if err != nil {
+		return err
+	}
+	// The original login queried username and password together. Its obsolete index
+	// would duplicate every Argon2id hash and is unnecessary for username lookup.
+	if db.Migrator().HasIndex(&models.User{}, "idx_username_password") {
+		return db.Migrator().DropIndex(&models.User{}, "idx_username_password")
+	}
+
+	return nil
 }
 
 // 初始化一个用户,一个用户都没有的时候创建一个
@@ -141,10 +154,28 @@ func NotFoundAndCreateUser(db *gorm.DB) error {
 		fUser.Name = username
 		fUser.Status = 1
 		fUser.Role = 1
-		fUser.Password = cmn.PasswordEncryption("12345678")
+		password, supplied := os.LookupEnv("SUN_PANEL_INITIAL_PASSWORD")
+		if !supplied {
+			var err error
+			password, err = security.RandomPassword()
+			if err != nil {
+				return err
+			}
+		}
+		if err := security.ValidateNewPassword(password); err != nil {
+			return err
+		}
+		var err error
+		fUser.Password, err = security.HashPassword(password)
+		if err != nil {
+			return err
+		}
 
 		if errCreate := db.Create(&fUser).Error; errCreate != nil {
 			return errCreate
+		}
+		if !supplied {
+			log.Print("Initial administrator created. Run -password-reset to set its password, or set SUN_PANEL_INITIAL_PASSWORD before first boot.")
 		}
 	}
 

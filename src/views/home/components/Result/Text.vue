@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
 import mdKatex from '@traptitech/markdown-it-katex'
-import mila from 'markdown-it-link-attributes'
+import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import { NAlert } from 'naive-ui'
 import { useBasicLayout } from '@/hooks/useBasicLayout'
@@ -34,7 +34,6 @@ const mdi = new MarkdownIt({
   },
 })
 
-mdi.use(mila, { attrs: { target: '_blank', rel: 'noopener' } })
 mdi.use(mdKatex, { blockClass: 'katexmath-block rounded-md p-[10px]', errorColor: ' #cc0000' })
 
 const wrapClass = computed(() => {
@@ -65,7 +64,7 @@ defineExpose({ textRef })
           {{ text }}
         </NAlert>
       </div>
-      <div v-else-if="!asRawText" class="markdown-body" v-html="mdi.render(text ?? '')" />
+      <div v-else-if="!asRawText" class="markdown-body" v-html="DOMPurify.sanitize(mdi.render(text ?? ''))" />
       <div v-else class="whitespace-pre-wrap" v-text="text" />
       <template v-if="loading">
         <span class="dark:text-white w-[4px] h-[20px] block animate-blink" />

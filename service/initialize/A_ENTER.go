@@ -15,6 +15,7 @@ import (
 	"sun-panel/initialize/systemSettingCache"
 	"sun-panel/initialize/userToken"
 	"sun-panel/lib/cmn"
+	"sun-panel/lib/security"
 	"sun-panel/models"
 	"sun-panel/structs"
 	"time"
@@ -121,9 +122,13 @@ func DatabaseConnect() {
 		models.Db = global.Db
 	}
 
-	database.CreateDatabase(databaseDrive, global.Db)
+	if err := database.CreateDatabase(databaseDrive, global.Db); err != nil {
+		log.Fatalf("Database migration failed: %v", err)
+	}
 
-	database.NotFoundAndCreateUser(global.Db)
+	if err := database.NotFoundAndCreateUser(global.Db); err != nil {
+		log.Fatalf("Administrator initialization failed: %v", err)
+	}
 }
 
 // 命令行运行
@@ -149,32 +154,39 @@ func CommandRun() {
 		// 重置密码
 
 		// 配置初始化
-		config, _ := config.ConfigInit()
-		global.Config = config
-
+		cfg, err := config.ConfigInit()
+		if err != nil {
+			log.Fatal("Configuration initialization failed")
+		}
+		global.Config = cfg
 		DatabaseConnect()
-		userInfo := models.User{}
-		if err := global.Db.Where("role=?", 1).Order("id").First(&userInfo).Error; err != nil {
-			fmt.Println("ERROR", err.Error())
-			os.Exit(0) // 务必退出
+		var userInfo models.User
+		if err := global.Db.Where("role = ?", 1).Order("id").First(&userInfo).Error; err != nil {
+			log.Fatal("Administrator account not found")
 		}
-
-		newPassword := "12345678"
-
-		updateInfo := models.User{
-			Password: cmn.PasswordEncryption(newPassword),
-			Token:    "",
+		newPassword, supplied := os.LookupEnv("SUN_PANEL_RESET_PASSWORD")
+		if !supplied {
+			newPassword, err = security.RandomPassword()
+			if err != nil {
+				log.Fatal("Password generation failed")
+			}
 		}
-		// 重置第一个管理员的密码
-		if err := global.Db.Select("Password", "Token").Where("id=?", userInfo.ID).Updates(&updateInfo).Error; err != nil {
-			fmt.Println("ERROR", err.Error())
-			os.Exit(0) // 务必退出
+		if err := security.ValidateNewPassword(newPassword); err != nil {
+			log.Fatal(err)
 		}
-
-		fmt.Println("The password has been successfully reset. Here is the account information")
-		fmt.Println("Username ", userInfo.Username)
-		fmt.Println("Password ", newPassword)
-		os.Exit(0) // 务必退出
+		hash, err := security.HashPassword(newPassword)
+		if err != nil {
+			log.Fatal("Password hashing failed")
+		}
+		result := global.Db.Model(&models.User{}).Where("id = ?", userInfo.ID).Updates(map[string]interface{}{"password": hash, "token": ""})
+		if result.Error != nil || result.RowsAffected != 1 {
+			log.Fatal("Password reset failed")
+		}
+		fmt.Printf("Password reset for %s\n", userInfo.Username)
+		if !supplied {
+			fmt.Printf("Generated password: %s\n", newPassword)
+		}
+		os.Exit(0)
 	} else {
 		return
 	}

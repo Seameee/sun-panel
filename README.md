@@ -1,198 +1,51 @@
-[[ 简体中文 ]](https://sun-panel-doc.enianteam.com/zh_cn/introduce/project.html) |
-[[ English ]](https://sun-panel-doc.enianteam.com/introduce/project.html)
-
-<div align=center>
-
-<img src="./doc/images/logo.png" width="100" height="100" />
-
 # Sun-Panel
 
-[![Github](https://img.shields.io/badge/Github-123456?logo=github&labelColor=242424)](https://github.com/hslr-s/sun-panel)
-[![Gitee](https://img.shields.io/badge/Gitee-123456?logo=gitee&labelColor=c71d23)](https://gitee.com/hslr/sun-panel)
-[![docker](https://img.shields.io/badge/docker-123456?logo=docker&logoColor=fff&labelColor=1c7aed)](https://hub.docker.com/r/hslr/sun-panel) 
-[![Bilibili](https://img.shields.io/badge/Bilibili-123456?logo=bilibili&logoColor=fff&labelColor=fb7299)](https://space.bilibili.com/27407696/channel/collectiondetail?sid=2023810)
-[![YouTube](https://img.shields.io/badge/YouTube-123456?logo=youtube&labelColor=ff0000)](https://www.youtube.com/channel/UCKwbFmKU25R602z6P2fgPYg)
-<br>
-[![GitHub User's stars](https://img.shields.io/github/stars/hslr-s%2Fsun-panel?style=flat&logo=github)](https://github.com/hslr-s/sun-panel)
-[![github downloads](https://img.shields.io/github/downloads/hslr-s/sun-panel/total.svg?logo=github)](https://github.com/hslr-s/sun-panel/releases)
-[![docker pulls](https://img.shields.io/docker/pulls/hslr/sun-panel.svg?logo=docker)](https://hub.docker.com/r/hslr/sun-panel)
+Sun-Panel 是一个自托管导航面板，可以分组管理网站和服务，为同一张卡片设置内外网地址，也可以用作浏览器首页。这个分支以官方 [v1.3.0](https://github.com/hslr-s/sun-panel/tree/v1.3.0)（`31fd128`）为基础，沿用 [MIT 许可](LICENSE)。
 
-[[ 中文文档 ]](https://sun-panel-doc.enianteam.com/zh_cn) |
-[[ Document ]](https://sun-panel-doc.enianteam.com) |
-[[ Demo ]](http://sunpaneldemo.enianteam.com) 
+## v1.3.1-preview.1
 
-Server, NAS navigation panel, Homepage, Browser homepage.
-<br>
-一个服务器、NAS导航面板、Homepage、浏览器首页。
+- 在「个人信息 → 账号安全」绑定动态口令（TOTP）或通行密钥（Passkey）。开启 TOTP 后，密码登录需要输入验证器中的动态口令。已注册的通行密钥可以直接登录。
+- 登录后点击右下角的铅笔开始排序。卡片可以在组内排序，也可以拖到其他组。点击勾号保存，点击叉号取消。
+- 旧密码在登录成功后改用 Argon2id 存储。密码登录按账号和来源限速。初始管理员使用原版默认密码时，首次登录会要求改密。
+- 卡片和分组的写入会检查归属。自动获取站点图标时只访问公网 HTTP(S) 地址，内网服务可以手动上传图标。公开首页隐藏内网地址和服务器硬件详情。上传图片会校验内容，旧文件仍可通过原路径访问。
+- 更新了 Go、Vue、Vite 和运行时依赖。容器使用 UID/GID `10001:10001` 运行。
 
-</div>
-
-<!-- <img src="./doc/images/logo.png" align="left" width="180px" height="180px"/>
-<img align="left" width="0" height="192px" hspace="10"/>
-
-# Sun-Panel
-Server, NAS navigation panel, Homepage, Browser homepage.
-<br>
-一个服务器、NAS导航面板、Homepage、浏览器首页。 -->
-
-
-
-
-![](./doc/images/icon-info-new.png)
-
-## 😎 特点
-
-- 简洁
-- 局域网内外网链接切换
-- docker部署,对arm系统支持
-- 上手简单，免修改代码
-- 无需连接外部数据库
-- 丰富图标自由搭配（文字图标+svg图标+内置三方图标库）
-- 支持网页内置小窗口打开（部分网站屏蔽此功能）
-- 占用资源小
-
-## 🧊 最新完整文档（DOC）
-
-[最新完整文档（DOC）](https://sun-panel-doc.enianteam.com/)
-
-
-## 🎨 演示（demo）
-
-[查看演示站](https://sun-panel-doc.enianteam.com/introduce/demo_site.html)
-
-## 🐳 交流群&社区
-开发者：**[红烧猎人](https://blog.enianteam.com/u/sun/content/11)**
-
-QQ交流群，进不去可以点上方连接联系作者
-
-<img src="./doc/images/qq_group_qr2.png"  height="350" />
-
-Github社区板块：https://github.com/hslr-s/sun-panel/discussions
-
-## 🍵 打赏
-
-> 开源开发不易，如果觉得我的项目有帮到你，欢迎给我[打赏](./doc/donate.md)或者请我喝个奶茶☕（如果可以备注下您的昵称或者名字），你的支持就是我的动力，谢谢。
-
-<a href="https://www.paypal.me/hslrs">
-<img height="60" src="./doc/images/donate/paypal.png" target="_blank"></img> 
-</a>
-
-
-|   |   |
-| ------------ | ------------ |
-| <img height="300" src="./doc/images/donate/weixin.png"/> |  <img height="300" src="./doc/images/donate/alipay.png" /> |
-
-## 🫓 TODO
-
-- [x] 分组，拖拽排序
-- [x] 导入导出功能
-- [x] 增加访客账号
-- [x] 帐号解除邮箱限制
-- [x] 对上传的文件管理（针对账户增强重复利用，节省空间）
-- [x] 服务器监控
-- [x] 多国语言支持
-- [ ] 用户自定义搜索框搜索引擎
-- [ ] 搜索框样式自定义（背景颜色，文字颜色）
-- [ ] docker管理器
-- [ ] 计划任务
-
-
-
-## 🖼️ 预览截图
-
-**各种风格，自由搭配**
-
-![](./doc/images/icon-small-new.png)
-![](./doc/images/transparent-info.png)
-![](./doc/images/transparent-small.png)
-![](./doc/images/solid-color-info.png)
-![](./doc/images/full-color-small.jpg)
-
-**内置小窗口**
-
-![](./doc/images/window-ssh.png)
-![](./doc/images/window-xunlei.png)
-
-## 🍜 使用运行教程
-
-<div id="default-username"></div>
-
-### 默认账号密码
-账号：admin@sun.cc
-
-密码：12345678
-
-### 命令参数
-|参数|说明|
-|---|---|
-|-h|查看命令说明|
-|-config|生成配置文件（conf/conf.ini）|
-|-password-reset|重置第一个用户的密码|
-
-### 二进制文件运行
-
-去 [Releases](https://github.com/hslr-s/sun-panel/releases) 下载二进制文件
-
-执行示例
+## Docker 安装
 
 ```sh
-./sun-panel
+docker compose up -d
 ```
 
-#### 重置密码
-
-执行示例
+仓库的 `docker-compose.yml` 使用 GHCR 预览镜像。本机访问 `http://127.0.0.1:3002`。首次启动后运行下面的命令，为 `admin@sun.cc` 生成密码。也可以在首次启动前用 `SUN_PANEL_INITIAL_PASSWORD` 提供密码。
 
 ```sh
-./sun-panel -password-reset
-```
-输出
-```
-密码已经重置成功，以下是账号信息
-用户名  xxx@qq.com
-密码  12345678
+docker compose exec sun-panel /app/sun-panel -password-reset
 ```
 
-### docker 运行
+从 HTTPS 访问面板时，在 `conf/conf.ini` 加入下面的配置并重启容器。`webauthn_origins` 填浏览器地址栏里的来源，使用非默认端口时也写上端口。注册后请保持 `webauthn_rp_id` 稳定。
 
-目录挂载 `-v`，根据自己的需求选择：
-|容器目录|说明|
-|---|---|
-|/app/conf|配置文件|
-|/app/uploads|上传的文件|
-|/app/database|数据库文件|
-|/app/runtime|运行日志(不推荐挂载)|
+```ini
+[security]
+webauthn_rp_id=panel.example.com
+webauthn_origins=https://panel.example.com
+```
 
-1. 拉取镜像
+## 从 1.3.0 升级
+
+1. 停止旧容器，备份 `conf`、`database` 和 `uploads`，同时保存原 Compose 文件。使用 MySQL 时单独备份数据库。使用自定义上传目录时，备份配置里 `source_path` 指向的目录。
+2. 在备份副本上试跑新版。沿用原路径和连接配置。使用绑定挂载时，给容器用户 `10001:10001` 授予挂载目录所需的权限。也可在 Compose 中设置已有的非 root UID/GID。
+3. 用原账号登录，检查分组、卡片、图片和自定义设置。数据库会在启动时平移。新版登录后生成的 Argon2id 密码无法由旧版验证。需要回退时，使用原 Compose 文件与升级前的数据库和文件快照。
+
+从先前的 `v1.7.0-preview.1` 迁移时，原来的导航卡片和认证记录可沿用。该版本特有的 Docker 卡片、内置应用及高级卡片样式在本分支中没有对应功能。请保存旧数据库快照以备查。若用户启用了 TOTP，请备份验证器。数据库中保存 TOTP 的共享密钥，应限制备份的访问权限。
+
+## 开发和构建
+
+前端使用 Node.js 24 和 `pnpm`。后端使用带 C 编译器的 Go 工具链，以便构建 SQLite 驱动。
+
 ```sh
-docker pull hslr/sun-panel
+pnpm install --frozen-lockfile
+pnpm run type-check
+VITE_GLOB_API_URL=/api pnpm run build-only
 ```
 
-2. 直接下载运行
-```sh
-docker run -d --restart=always -p 3002:3002 \
--v ~/docker_data/sun-panel/conf:/app/conf \
--v ~/docker_data/sun-panel/uploads:/app/uploads \
--v ~/docker_data/sun-panel/database:/app/database \
---name sun-panel \
-hslr/sun-panel
-```
-
-
-### 自编译运行
-
-[请参考完整文档](https://sun-panel-doc.enianteam.com/zh_cn/usage/compile.html)
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=hslr-s/sun-panel&type=Date)](https://star-history.com/#hslr-s/sun-panel&Date)
-
-
-## ❤️ 感谢
-
-- [Roc](https://github.com/RocCheng)
-- [jackloves111](https://github.com/jackloves111)
-- [Rock.L](https://github.com/gitlyp)
-
-## LICENSE
-[MIT](./LICENSE)
+推送 `v*-preview.*` 标签时，GitHub Actions 构建并验证 `linux/amd64` 容器，镜像以同名标签发布到 GHCR。构建和镜像可以在仓库的 [Actions](https://github.com/Seameee/sun-panel/actions/workflows/docker-preview.yml) 页面查询。

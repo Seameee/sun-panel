@@ -10,6 +10,7 @@ import { RoundCardModal, SvgIcon } from '@/components/common/'
 import { updateInfo, updatePassword } from '@/api/system/user'
 import { updateLocalUserInfo } from '@/utils/cmn'
 import { t } from '@/locales'
+import SecuritySettings from './SecuritySettings.vue'
 
 const userStore = useUserStore()
 const authStore = useAuthStore()
@@ -42,35 +43,36 @@ const updatePasswordModalFormRules: FormRules = {
   oldPassword: {
     required: true,
     trigger: 'blur',
-    min: 6,
-    max: 20,
-    message: t('adminSettingUsers.formRules.passwordLimit'),
+    message: t('settingUserInfo.oldPassword'),
   },
   password: {
     required: true,
     trigger: 'blur',
-    min: 6,
-    max: 20,
-    message: t('adminSettingUsers.formRules.passwordLimit'),
+    min: 8,
+    max: 200,
+    message: t('apiErrorCode.1106'),
   },
   confirmPassword: {
     required: true,
     trigger: 'blur',
-    min: 6,
-    max: 20,
-    message: t('adminSettingUsers.formRules.passwordLimit'),
+    min: 8,
+    max: 200,
+    message: t('apiErrorCode.1106'),
   },
 }
 
-async function logoutApi() {
-  await logout()
+function clearLocalSession() {
   userStore.resetUserInfo()
   authStore.removeToken()
   panelState.removeState()
   appStore.removeToken()
+}
+
+async function logoutApi() {
+  await logout()
+  clearLocalSession()
   ms.success(t('settingUserInfo.logoutSuccess'))
-  // router.push({ path: '/login' })
-  location.reload()// 强制刷新一下页面
+  location.reload()
 }
 
 function handleSaveInfo() {
@@ -88,26 +90,27 @@ function handleSaveInfo() {
 function handleUpdatePassword(e: MouseEvent) {
   e.preventDefault()
   formRef.value?.validate((errors) => {
-    if (errors) {
-      console.log(errors)
+    if (errors)
       return
-    }
 
     if (updatePasswordModalState.value.form.password !== updatePasswordModalState.value.form.confirmPassword) {
       ms.error(t('settingUserInfo.confirmPasswordInconsistentMsg'))
       return
     }
     updatePasswordModalState.value.loading = true
-    updatePassword(updatePasswordModalState.value.form.oldPassword, updatePasswordModalState.value.form.password).then(({ code, msg }) => {
+    updatePassword(updatePasswordModalState.value.form.oldPassword, updatePasswordModalState.value.form.password).then(({ code }) => {
       if (code === 0) {
-        // 成功
         updatePasswordModalState.value.show = false
-        ms.success(t('common.success'))
+        updatePasswordModalState.value.form = { oldPassword: '', password: '', confirmPassword: '' }
+        clearLocalSession()
+        location.assign('/login')
       }
     }).finally(() => {
       updatePasswordModalState.value.loading = false
-    }).catch(() => {
-      ms.error(t('common.serverError'))
+    }).catch((error: { code?: number; msg?: string }) => {
+      const key = `apiErrorCode.${error.code}`
+      const localized = t(key)
+      ms.error(localized === key ? error.msg || t('common.serverError') : localized)
     })
   })
 }
@@ -196,6 +199,8 @@ function handleChangeTheme(value: Theme) {
       </div>
     </NCard>
 
+    <SecuritySettings />
+
     <NCard style="border-radius:10px" class="mt-[10px]" size="small">
       <NButton size="small" text type="error" @click="handleLogout">
         <template #icon>
@@ -208,15 +213,15 @@ function handleChangeTheme(value: Theme) {
     <RoundCardModal v-model:show="updatePasswordModalState.show" size="small" preset="card" style="width: 400px" :title="$t('settingUserInfo.updatePassword')">
       <NForm ref="formRef" :model="updatePasswordModalState.form" :rules="updatePasswordModalFormRules">
         <NFormItem path="oldPassword" :label="$t('settingUserInfo.oldPassword')">
-          <NInput v-model:value="updatePasswordModalState.form.oldPassword" :maxlength="20" type="password" :placeholder="$t('settingUserInfo.oldPassword')" />
+          <NInput v-model:value="updatePasswordModalState.form.oldPassword" :maxlength="200" type="password" :placeholder="$t('settingUserInfo.oldPassword')" />
         </NFormItem>
 
         <NFormItem path="password" :label="$t('settingUserInfo.newPassword')">
-          <NInput v-model:value="updatePasswordModalState.form.password" :maxlength="20" type="password" :placeholder="$t('settingUserInfo.newPassword')" />
+          <NInput v-model:value="updatePasswordModalState.form.password" :maxlength="200" type="password" :placeholder="$t('settingUserInfo.newPassword')" />
         </NFormItem>
 
         <NFormItem path="confirmPassword" :label="$t('settingUserInfo.confirmPassword')">
-          <NInput v-model:value="updatePasswordModalState.form.confirmPassword" :maxlength="20" type="password" :placeholder="$t('settingUserInfo.confirmPassword')" />
+          <NInput v-model:value="updatePasswordModalState.form.confirmPassword" :maxlength="200" type="password" :placeholder="$t('settingUserInfo.confirmPassword')" />
         </NFormItem>
       </NForm>
 
