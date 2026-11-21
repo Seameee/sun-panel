@@ -2,6 +2,8 @@ package system
 
 import (
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"sun-panel/api/api_v1/common/apiReturn"
 	"sun-panel/api/api_v1/common/base"
@@ -10,14 +12,37 @@ import (
 	"sun-panel/lib/captcha"
 	"sun-panel/lib/security"
 	"sun-panel/models"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"time"
 )
 
 type LoginApi struct {
+}
+
+const (
+	passwordLoginBodyLimit = 16 << 10
+	passkeyLoginBodyLimit  = 256 << 10
+)
+
+// Read the entire bounded body before binding: a JSON decoder can otherwise
+// stop at the first value without reading an oversized trailing body.
+func bindLoginJSON(c *gin.Context, dst any, limit int64) error {
+	if c.Request.ContentLength > limit {
+		return &http.MaxBytesError{Limit: limit}
+	}
+	if c.Request.Body == nil {
+		return io.EOF
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	return binding.JSON.BindBody(body, dst)
 }
 
 // 登录输入验证
@@ -38,7 +63,7 @@ type LoginLoginVerify struct {
 // @Router /login [post]
 func (l LoginApi) Login(c *gin.Context) {
 	param := LoginLoginVerify{}
-	if err := c.ShouldBindJSON(&param); err != nil {
+	if err := bindLoginJSON(c, &param, passwordLoginBodyLimit); err != nil {
 		apiReturn.ErrorParamFomat(c, err.Error())
 		return
 	}
@@ -121,9 +146,13 @@ func allowPasswordAttempt(c *gin.Context, account string) bool {
 	if security.PasswordAttempts.Allow(account, security.PasswordSource(c), time.Now()) {
 		return true
 	}
+	retryLoginLater(c)
+	return false
+}
+
+func retryLoginLater(c *gin.Context) {
 	c.Header("Retry-After", "300")
 	apiReturn.ErrorByCode(c, 1104)
-	return false
 }
 
 // issueSession binds an opaque client token to the current database session generation.
@@ -166,7 +195,15 @@ func (LoginApi) issueSession(c *gin.Context, info models.User) {
 // @Tags user
 // @Router /login/passkey/begin [post]
 func (l LoginApi) PasskeyLoginBegin(c *gin.Context) {
+	if !security.PasskeyBeginAttempts.Allow(security.PasswordSource(c), time.Now()) {
+		retryLoginLater(c)
+		return
+	}
 	result, err := biz.Security.BeginPasskeyLogin(biz.SessionBinding(c.GetHeader("token")))
+	if errors.Is(err, security.ErrChallengeStoreFull) {
+		retryLoginLater(c)
+		return
+	}
 	if err != nil {
 		securityErrorResponse(c, err)
 		return
@@ -185,7 +222,7 @@ func (l LoginApi) PasskeyLoginBegin(c *gin.Context) {
 // @Router /login/passkey/finish [post]
 func (l LoginApi) PasskeyLoginFinish(c *gin.Context) {
 	param := securityCredentialParam{}
-	if err := c.ShouldBindJSON(&param); err != nil {
+	if err := bindLoginJSON(c, &param, passkeyLoginBodyLimit); err != nil {
 		apiReturn.ErrorParamFomat(c, err.Error())
 		return
 	}

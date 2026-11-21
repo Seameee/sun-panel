@@ -26,7 +26,7 @@ func PublicModeInterceptor(c *gin.Context) {
 	var userId *uint
 	if err := global.SystemSetting.GetValueByInterface(systemSetting.PANEL_PUBLIC_USER_ID, &userId); err == nil && userId != nil {
 		userInfo := models.User{}
-		if err := global.Db.First(&userInfo, "id=?", userId).Error; err != nil {
+		if err := global.Db.First(&userInfo, "id=? AND status=?", userId, 1).Error; err != nil {
 			apiReturn.ErrorCode(c, 1001, global.Lang.Get("login.err_token_expire"), nil)
 			c.Abort()
 			return

@@ -2,6 +2,12 @@
 
 Sun-Panel 是一个自托管导航面板，可以分组管理网站和服务，为同一张卡片设置内外网地址，也可以用作浏览器首页。这个分支以官方 [v1.3.0](https://github.com/hslr-s/sun-panel/tree/v1.3.0)（`31fd128`）为基础，沿用 [MIT 许可](LICENSE)。
 
+## v1.3.1-preview.4
+
+- Passkey 支持通过 `SUN_PANEL_WEBAUTHN_ORIGIN` 配置。Compose 显式使用 UID/GID `10001:10001`。
+- 密码登录和 Passkey 验证限制请求体大小。Passkey 登录发起按来源限流，挑战池满时保留已发出的有效挑战。
+- 公开展示账号停用后，访客无法继续查看该账号的面板。
+
 ## v1.3.1-preview.3
 
 - 右下角排序的确认和取消按钮采用与工具栏一致的白色图标。
@@ -24,19 +30,21 @@ Sun-Panel 是一个自托管导航面板，可以分组管理网站和服务，�
 docker compose up -d
 ```
 
-仓库的 `docker-compose.yml` 使用 GHCR 预览镜像。本机访问 `http://127.0.0.1:3002`。首次启动后运行下面的命令，为 `admin@sun.cc` 生成密码。也可以在首次启动前用 `SUN_PANEL_INITIAL_PASSWORD` 提供密码。
+仓库的 `docker-compose.yml` 使用 GHCR 预览镜像，并以 UID/GID `10001:10001` 运行。本机访问 `http://127.0.0.1:3002`。首次启动后运行下面的命令，为 `admin@sun.cc` 生成密码。也可以在首次启动前用 `SUN_PANEL_INITIAL_PASSWORD` 提供密码。
 
 ```sh
 docker compose exec sun-panel /app/sun-panel -password-reset
 ```
 
-从 HTTPS 访问面板时，在 `conf/conf.ini` 加入下面的配置并重启容器。`webauthn_origins` 填浏览器地址栏里的来源，使用非默认端口时也写上端口。有效的 HTTPS 证书和这两项配置都是启用 Passkey 的条件。注册后请保持 `webauthn_rp_id` 稳定。
+### 配置 Passkey
 
-```ini
-[security]
-webauthn_rp_id=panel.example.com
-webauthn_origins=https://panel.example.com
+将浏览器实际访问的 HTTPS 来源传给容器。使用非默认端口时带上端口，例如 `https://panel.example.com:8443`。修改环境变量后，用 Compose 重新创建容器。
+
+```sh
+SUN_PANEL_WEBAUTHN_ORIGIN=https://panel.example.com docker compose up -d
 ```
+
+程序用完整来源配置 `webauthn_origins`，并从中提取主机名作为 `webauthn_rp_id`。环境变量有值时，两项一起覆盖 INI 配置。留空时沿用 `conf/conf.ini` 中 `[security]` 的配置，支持原有的多来源设置和父域 RP ID。已有通行密钥的站点应保持原 RP ID。如果原 RP ID 是父域，请继续使用 INI 配置。
 
 ## 从 1.3.0 升级
 
@@ -44,7 +52,7 @@ webauthn_origins=https://panel.example.com
 2. 在备份副本上试跑新版。沿用原路径和连接配置。使用绑定挂载时，给容器用户 `10001:10001` 授予挂载目录所需的权限。也可在 Compose 中设置已有的非 root UID/GID。
 3. 用原账号登录，检查分组、卡片、图片和自定义设置。数据库会在启动时平移。新版登录后生成的 Argon2id 密码无法由旧版验证。需要回退时，使用原 Compose 文件与升级前的数据库和文件快照。
 
-从先前的 `v1.7.0-preview.1` 迁移时，原来的导航卡片和认证记录可沿用。该版本特有的 Docker 卡片、内置应用及高级卡片样式在本分支中没有对应功能。请保存旧数据库快照以备查。若用户启用了 TOTP，请备份验证器。数据库中保存 TOTP 的共享密钥，应限制备份的访问权限。
+启用了 TOTP 的用户应备份验证器。数据库中保存 TOTP 的共享密钥，请限制备份的访问权限。
 
 ## 开发和构建
 

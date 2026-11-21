@@ -7,8 +7,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -184,13 +188,20 @@ func defaultSecurityConfig() SecurityConfig {
 	}
 }
 
-// Config 读取并校验 [security] 配置；非法值会被丢弃而不是放行
+// Config reads the existing [security] options and optionally replaces the RP ID and origins together.
 func (s SecurityType) Config() SecurityConfig {
 	cfg := defaultSecurityConfig()
-	if global.Config == nil || global.Config.Config == nil {
-		return cfg
+	if global.Config != nil && global.Config.Config != nil {
+		cfg.readINI()
 	}
 
+	if origin := strings.TrimSpace(os.Getenv("SUN_PANEL_WEBAUTHN_ORIGIN")); origin != "" {
+		cfg.RPID, cfg.RPOrigins = webAuthnOriginFromEnv(origin)
+	}
+	return cfg
+}
+
+func (cfg *SecurityConfig) readINI() {
 	get := func(name string) string {
 		return strings.TrimSpace(global.Config.GetValueString("security", name))
 	}
@@ -224,8 +235,46 @@ func (s SecurityType) Config() SecurityConfig {
 		}
 		cfg.RPOrigins = append(cfg.RPOrigins, origin)
 	}
+}
 
-	return cfg
+func webAuthnOriginFromEnv(raw string) (string, []string) {
+	origin, ok := normalizeWebAuthnOrigin(raw)
+	if !ok || strings.ContainsAny(raw, "?#") {
+		return "", nil
+	}
+	u, err := url.Parse(origin)
+	if err != nil || strings.HasSuffix(u.Host, ":") {
+		return "", nil
+	}
+	host := u.Hostname()
+	if host != "localhost" && !validDNSName(host) {
+		return "", nil
+	}
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", nil
+		}
+		origin = u.Scheme + "://" + host
+		if !(u.Scheme == "https" && n == 443 || u.Scheme == "http" && n == 80) {
+			origin += ":" + strconv.Itoa(n)
+		}
+	}
+	return host, []string{origin}
+}
+
+var dnsLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+func validDNSName(host string) bool {
+	if len(host) > 253 || !strings.Contains(host, ".") || net.ParseIP(host) != nil {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if !dnsLabel.MatchString(label) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeWebAuthnOrigin(raw string) (string, bool) {

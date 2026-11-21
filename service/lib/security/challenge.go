@@ -29,7 +29,7 @@ var (
 	ErrChallengeExpired = errors.New("challenge expired")
 	// ErrChallengeKindMismatch 挑战类型不匹配
 	ErrChallengeKindMismatch = errors.New("challenge kind mismatch")
-	// ErrChallengeStoreFull 挑战池已满且无法驱逐
+	// ErrChallengeStoreFull 挑战池或公开登录配额已满
 	ErrChallengeStoreFull = errors.New("challenge store full")
 )
 
@@ -67,7 +67,8 @@ func NewChallengeID() (string, error) {
 // ChallengeStore 并发安全的内存挑战池
 //
 // 单次使用：Take 会原子地移除条目，因此同一个 flowId 只能被消费一次。
-// 容量上限：Put 时先清理过期条目，仍然超限则驱逐最快过期的条目。
+// 容量上限：只清理过期条目，不驱逐有效挑战。公开登录最多占用一半容量，
+// 其余容量留给已登录的安全管理流程。
 type ChallengeStore struct {
 	mu       sync.Mutex
 	items    map[string]*Challenge
@@ -116,13 +117,10 @@ func (s *ChallengeStore) Put(ch *Challenge) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.pruneLocked(now)
-
-	if len(s.items) >= s.capacity {
-		s.evictSoonestLocked()
-		if len(s.items) >= s.capacity {
-			return ErrChallengeStoreFull
-		}
+	publicCount := s.pruneLocked(now)
+	if len(s.items) >= s.capacity || s.items[ch.ID] != nil ||
+		(ch.Kind == ChallengePasskeyLogin && publicCount >= s.capacity/2) {
+		return ErrChallengeStoreFull
 	}
 
 	s.items[ch.ID] = ch
@@ -154,7 +152,7 @@ func (s *ChallengeStore) Take(id string, kind ChallengeKind) (*Challenge, error)
 	return ch, nil
 }
 
-// Len 返回当前条目数（含尚未清理的过期条目之外的条目）
+// Len 返回未过期的挑战数。
 func (s *ChallengeStore) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -162,24 +160,13 @@ func (s *ChallengeStore) Len() int {
 	return len(s.items)
 }
 
-func (s *ChallengeStore) pruneLocked(now time.Time) {
+func (s *ChallengeStore) pruneLocked(now time.Time) (publicCount int) {
 	for id, ch := range s.items {
 		if !ch.ExpiresAt.IsZero() && !now.Before(ch.ExpiresAt) {
 			delete(s.items, id)
+		} else if ch.Kind == ChallengePasskeyLogin {
+			publicCount++
 		}
 	}
-}
-
-func (s *ChallengeStore) evictSoonestLocked() {
-	var victimID string
-	var victimExpire time.Time
-	for id, ch := range s.items {
-		if victimID == "" || ch.ExpiresAt.Before(victimExpire) {
-			victimID = id
-			victimExpire = ch.ExpiresAt
-		}
-	}
-	if victimID != "" {
-		delete(s.items, victimID)
-	}
+	return publicCount
 }
