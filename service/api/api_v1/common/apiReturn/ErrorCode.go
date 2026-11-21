@@ -55,6 +55,10 @@ var ErrorCodeMap = map[int]error{
 	ErrCodeProAuthServerError:                   errors.New("server error"),                      // proAuth:服务器错误
 
 	ErrCodeCustomJSAndCSSFilePreservationFailure: errors.New("custom JS and CSS file preservation failure"),
+
+	// 验证器类（与 apiReturn.ERROR_CODE_VERIFICATION_* 一致）
+	ERROR_CODE_VERIFICATION_MUST: errors.New("verification required"), // 需要二次验证（1101）
+	ERROR_CODE_VERIFICATION_FAIL: errors.New("verification failed"),   // 二次验证失败（1102）
 }
 
 func GetError(code int) error {

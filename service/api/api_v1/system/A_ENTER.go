@@ -10,4 +10,5 @@ type ApiSystem struct {
 	MonitorApi      MonitorApi
 	OpenApiApi      OpenApiApi
 	CaptchaApi      CaptchaApi
+	SecurityApi     SecurityApi
 }

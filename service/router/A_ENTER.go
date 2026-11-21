@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,8 +90,20 @@ func InitRouter(router *gin.Engine) *gin.Engine {
 			log.Fatalf("Error reading directory '%s': %v\n", webPath, err)
 		}
 
+		// Keep URLs already saved by v1.3.0 when its upload directory was customized.
+		sourcePath := global.Config.GetValueString("base", "source_path")
+		legacyPrefix := legacyUploadPrefix(sourcePath)
+		legacyFiles := http.StripPrefix(legacyPrefix, http.FileServer(gin.Dir(sourcePath, false)))
+
 		// 后端无法匹配的路由，将其重定向到前端
 		router.NoRoute(func(c *gin.Context) {
+			if legacyPrefix != "" && strings.HasPrefix(c.Request.URL.Path, legacyPrefix+"/") &&
+				(c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
+				c.Status(http.StatusOK)
+				legacyFiles.ServeHTTP(c.Writer, c.Request)
+				return
+			}
+
 			// 兼容前端history模式，后端路由匹配不到将其重定向到前端index.html
 			// c.File(webPath + "/index.html")
 
@@ -125,7 +138,6 @@ func InitRouter(router *gin.Engine) *gin.Engine {
 		// 其他特殊要绑定的路由
 
 		// 绑定上传目录的路由
-		sourcePath := global.Config.GetValueString("base", "source_path")
 		router.Static("/uploads", sourcePath)
 
 		// 绑定自定义风格的路由
@@ -140,6 +152,21 @@ func InitRouter(router *gin.Engine) *gin.Engine {
 	}
 
 	return router
+}
+
+func legacyUploadPrefix(sourcePath string) string {
+	if !strings.HasPrefix(sourcePath, "./") {
+		return ""
+	}
+	legacy := strings.TrimSuffix(strings.TrimPrefix(sourcePath, "./"), "/")
+	if legacy == "" || filepath.IsAbs(legacy) || filepath.ToSlash(filepath.Clean(legacy)) != legacy || strings.HasPrefix(legacy, ".") {
+		return ""
+	}
+	switch strings.SplitN(legacy, "/", 2)[0] {
+	case "api", "openApi", "uploads", "assets", "custom":
+		return ""
+	}
+	return "/" + legacy
 }
 
 // 动态绑定web目录的路由

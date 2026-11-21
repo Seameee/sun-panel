@@ -2,6 +2,7 @@
 import type { FormInst, FormRules } from 'naive-ui'
 import { NButton, NCard, NDivider, NFlex, NForm, NFormItem, NInput, NSelect, useMessage } from 'naive-ui'
 import { ref } from 'vue'
+import SecuritySettings from './SecuritySettings.vue'
 import { useAppStore, useAuthStore } from '@/store'
 import { languageOptions } from '@/utils/defaultData'
 import type { Language, Theme } from '@/store/modules/app/helper'
@@ -220,6 +221,9 @@ function handleChangeTheme(value: Theme) {
         </div>
       </div>
     </NCard>
+
+    <!-- 账号安全 -->
+    <SecuritySettings class="my-[10px]" />
 
     <!-- 账号切换 -->
     <NCard style="border-radius:10px" class="mt-[10px]" size="small">

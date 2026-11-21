@@ -101,6 +101,11 @@ declare namespace Panel {
         itemIconGroupId: number
     }
 
+    interface ItemIconGroupSortItem {
+        itemIconGroupId: number
+        itemIds: number[]
+    }
+
     interface ItemGroupInfoCardStyle {
         style: number;
         textColor: string;

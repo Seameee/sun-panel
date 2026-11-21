@@ -5,7 +5,7 @@ import { nextTick, onMounted, ref } from 'vue'
 import { AppStarter, EditItem, ItemCards } from './components'
 import { AccountSwitcher, Clock, SearchBox, SystemMonitor } from '@/components/deskModule'
 import { Loading, SvgIcon } from '@/components/common'
-import { deletes, getListByGroupId, saveSort } from '@/api/panel/itemIcon'
+import { deletes, getListByGroupId, saveSort, saveSortBatch } from '@/api/panel/itemIcon'
 import { getList as getGroupList } from '@/api/panel/itemIconGroup'
 import { apiRespErrMsg, setTitle, updateLocalUserInfo } from '@/utils/cmn'
 import { useTriggerUpdateItemData } from '@/hooks/useTriggerUpdateItemData'
@@ -35,6 +35,14 @@ const editItemInfoShow = ref<boolean>(false)
 const editItemInfoData = ref<Panel.ItemInfo | null>(null)
 
 const itemCardsLoading = ref(false)
+
+// 整页排序编辑模式：登录用户可组内/跨组拖动卡片，保存或取消
+const sortEditMode = ref(false)
+const sortSaving = ref(false)
+// 进入编辑模式时的本地快照，取消时直接还原，不请求后端
+let sortSnapshot: string | null = null
+// 编辑模式下多个分组共享的拖拽组名，用于跨组拖动
+const panelCardDragGroup = { name: 'panel-card', pull: true, put: true }
 
 // const dropdownShow = ref(false)
 const currentAddItenIconGroupId = ref<number | undefined>()
@@ -105,7 +113,8 @@ async function getList() {
       }
     }
 
-    getAllGroupList().then(() => {
+    // Keep loading active until the card requests also finish.
+    return getAllGroupList().then(() => {
       // console.log('全部完毕')
       filterItems.value = items.value
 
@@ -140,7 +149,7 @@ async function updateItemIconGroupByNet(itemIconGroupIndex: number, itemIconGrou
   })
 }
 
-function handleEditSuccess(item: Panel.ItemInfo) {
+function handleEditSuccess() {
   getList()
 }
 
@@ -272,6 +281,10 @@ onMounted(async () => {
 
 // 前端搜索过滤
 function itemFrontEndSearch(keyword?: string) {
+  // 排序编辑时不接受搜索过滤，避免拖动作用于过滤后的局部数据
+  if (sortEditMode.value)
+    return
+
   keyword = keyword?.trim()
   if (keyword !== '' && panelState.panelConfig.searchBoxSearchIcon) {
     const filteredData: ItemGroup[] = []
@@ -301,6 +314,10 @@ function handleSetHoverStatus(groupIndex: number, hoverStatus: boolean) {
 }
 
 function handleSetSortStatus(groupIndex: number, sortStatus: boolean) {
+  // 整页排序编辑中由顶部按钮统一控制，忽略分组内排序开关
+  if (sortEditMode.value)
+    return
+
   if (items.value[groupIndex])
     items.value[groupIndex].sortStatus = sortStatus
 
@@ -316,6 +333,88 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
   editItemInfoData.value = item || null
   currentAddItenIconGroupId.value = groupId
   editItemInfoShow.value = true
+}
+
+// 当前分组是否处于可拖动状态
+function isGroupSorting(itemGroup: ItemGroup) {
+  return sortEditMode.value || Boolean(itemGroup.sortStatus)
+}
+
+// 进入整页排序编辑
+function enterSortEditMode() {
+  if (sortEditMode.value || itemCardsLoading.value || authStore.visitMode !== VisitMode.VISIT_MODE_LOGIN)
+    return
+
+  // 搜索模式下 filterItems 是过滤后的副本，先退出搜索保证拖动作用于完整数据
+  filterItems.value = items.value
+  sortSnapshot = JSON.stringify(items.value)
+  sortEditMode.value = true
+}
+
+function exitSortEditMode() {
+  sortEditMode.value = false
+  sortSnapshot = null
+}
+
+// 取消排序：仅还原本地快照，不请求后端
+function cancelSortEditMode() {
+  if (sortSaving.value)
+    return
+
+  if (sortSnapshot) {
+    try {
+      items.value = JSON.parse(sortSnapshot)
+    }
+    catch {
+      // 快照异常时保留当前数据，只退出编辑模式
+    }
+  }
+
+  filterItems.value = items.value
+  exitSortEditMode()
+}
+
+// 保存排序：一次原子提交所有分组
+async function saveSortEditMode() {
+  if (sortSaving.value)
+    return
+
+  const groups: Panel.ItemIconGroupSortItem[] = []
+  for (const itemGroup of items.value) {
+    // 未加载完卡片的组不提交，后端不会修改未提交的分组
+    if (!itemGroup.id || !Array.isArray(itemGroup.items))
+      continue
+
+    groups.push({
+      itemIconGroupId: itemGroup.id,
+      itemIds: itemGroup.items.map(item => item.id as number),
+    })
+  }
+
+  if (groups.length === 0) {
+    ms.error(t('common.saveFail'))
+    return
+  }
+
+  sortSaving.value = true
+  try {
+    const { code, msg } = await saveSortBatch({ groups })
+    if (code === 0) {
+      ms.success(t('common.saveSuccess'))
+      exitSortEditMode()
+      getList()
+    }
+    else {
+      // 保存失败保持编辑态与本地顺序，便于重试或取消
+      ms.error(`${t('common.saveFail')}:${msg}`)
+    }
+  }
+  catch (error) {
+    apiRespErrMsg(error)
+  }
+  finally {
+    sortSaving.value = false
+  }
 }
 </script>
 
@@ -394,7 +493,7 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
             v-for="(itemGroup, itemGroupIndex) in filterItems" :id="`item-group-${itemGroup.onlyName}`"
             :key="itemGroupIndex"
             class="item-list mt-[50px]"
-            :class="`item-group-${itemGroup.onlyName} item-group-index-${itemGroupIndex} ${itemGroup.sortStatus ? (`border shadow-[0_0_30px_10px_rgba(0,0,0,0.3)]  p-[10px] rounded-2xl `) : ''}`"
+            :class="`item-group-${itemGroup.onlyName} item-group-index-${itemGroupIndex} ${isGroupSorting(itemGroup) ? (`border shadow-[0_0_30px_10px_rgba(0,0,0,0.3)]  p-[10px] rounded-2xl `) : ''}`"
             @mouseenter="handleSetHoverStatus(itemGroupIndex, true)"
             @mouseleave="handleSetHoverStatus(itemGroupIndex, false)"
           >
@@ -404,7 +503,7 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
                 {{ itemGroup.title }}
               </span>
               <div
-                v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN"
+                v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN && !sortEditMode"
                 class="group-buttons ml-2 delay-100 transition-opacity flex"
                 :class="itemGroup.hoverStatus ? 'opacity-100' : 'opacity-0'"
               >
@@ -418,7 +517,7 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
             </div>
 
             <!-- 编辑栏 -->
-            <div v-if="itemGroup.sortStatus" class="flex my-4">
+            <div v-if="itemGroup.sortStatus && !sortEditMode" class="flex my-4">
               <NButton color="#2a2a2a6b" size="small" @click="handleSaveSort(itemGroup)">
                 <template #icon>
                   <SvgIcon class="text-white font-xl" icon="material-symbols:save" />
@@ -432,19 +531,23 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
             <!-- 详情图标 -->
             <template v-if="itemGroup.items && (!itemGroup.cardStyle || itemGroup.cardStyle.style === PanelPanelConfigStyleEnum.info)">
               <VueDraggable
-                v-model="itemGroup.items" item-key="sort" :animation="300"
+                v-model="itemGroup.items" :animation="180"
+                draggable=".sortable-panel-card" :force-fallback="sortEditMode" :fallback-on-body="true"
                 class="icon-info-box"
-                :disabled="!itemGroup.sortStatus"
+                filter=".not-drag"
+                :group="sortEditMode ? panelCardDragGroup : undefined"
+                :disabled="sortSaving || !isGroupSorting(itemGroup)"
               >
                 <div
-                  v-for="item, index in itemGroup.items"
+                  v-for="item in itemGroup.items"
+                  class="sortable-panel-card"
                   :id="item.onlyName ? `item-card-name-${item.onlyName}` : ''"
-                  :key="index"
+                  :key="item.id"
                   :class="item.onlyName ? `item-card-name-${item.onlyName}` : ''"
                 >
                   <ItemCards
-                    :sort-status="itemGroup.sortStatus || false"
-                    :class="itemGroup.sortStatus ? 'cursor-move' : (item.url !== '' || item.lanUrl !== '' ? 'cursor-pointer' : '')"
+                    :sort-status="isGroupSorting(itemGroup)"
+                    :class="isGroupSorting(itemGroup) ? 'cursor-move' : (item.url !== '' || item.lanUrl !== '' ? 'cursor-pointer' : '')"
                     :card-info="item"
                     :icon-text-color="itemGroup.cardStyle.textColor"
                     :icon-text-info-hide-description="itemGroup.cardStyle.textInfoHideDescription || false"
@@ -456,7 +559,11 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
                   />
                 </div>
 
-                <div v-if="itemGroup.items.length === 0" class="not-drag">
+                <div v-if="sortEditMode && itemGroup.items.length === 0" class="not-drag sort-empty-hint">
+                  <SvgIcon class="text-white font-xl opacity-50" icon="ri:drag-move-2-line" />
+                </div>
+
+                <div v-if="!sortEditMode && itemGroup.items.length === 0" class="not-drag">
                   <ItemCards
                     :sort-status="itemGroup.sortStatus || false"
                     class="cursor-pointer"
@@ -475,20 +582,23 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
             <!-- APP图标宫型盒子 -->
             <template v-if="itemGroup.items && itemGroup.cardStyle.style === PanelPanelConfigStyleEnum.icon">
               <VueDraggable
-                v-model="itemGroup.items" item-key="sort" :animation="300"
+                v-model="itemGroup.items" :animation="180"
+                draggable=".sortable-panel-card" :force-fallback="sortEditMode" :fallback-on-body="true"
                 class="icon-small-box"
                 filter=".not-drag"
-                :disabled="!itemGroup.sortStatus"
+                :group="sortEditMode ? panelCardDragGroup : undefined"
+                :disabled="sortSaving || !isGroupSorting(itemGroup)"
               >
                 <div
-                  v-for="item, index in itemGroup.items"
+                  v-for="item in itemGroup.items"
+                  class="sortable-panel-card"
                   :id="item.onlyName ? `item-card-name-${item.onlyName}` : ''"
-                  :key="index"
+                  :key="item.id"
                   :class="item.onlyName ? `item-card-name-${item.onlyName}` : ''"
                 >
                   <ItemCards
-                    :sort-status="itemGroup.sortStatus || false"
-                    :class="itemGroup.sortStatus ? 'cursor-move' : (item.url !== '' || item.lanUrl !== '' ? 'cursor-pointer' : '')"
+                    :sort-status="isGroupSorting(itemGroup)"
+                    :class="isGroupSorting(itemGroup) ? 'cursor-move' : (item.url !== '' || item.lanUrl !== '' ? 'cursor-pointer' : '')"
                     :card-info="item"
                     :icon-text-color="itemGroup.cardStyle.textColor"
                     :icon-text-info-hide-description="itemGroup.cardStyle.textInfoHideDescription || false"
@@ -500,7 +610,11 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
                   />
                 </div>
 
-                <div v-if="itemGroup.items.length === 0" class="not-drag">
+                <div v-if="sortEditMode && itemGroup.items.length === 0" class="not-drag sort-empty-hint">
+                  <SvgIcon class="text-white font-xl opacity-50" icon="ri:drag-move-2-line" />
+                </div>
+
+                <div v-if="!sortEditMode && itemGroup.items.length === 0" class="not-drag">
                   <ItemCards
                     :sort-status="itemGroup.sortStatus || false"
                     class="cursor-pointer"
@@ -542,6 +656,20 @@ function toggleEditPanel(item: Panel.ItemInfo | null, groupId?: number) {
       >
         <SvgIcon class="text-white font-xl float-btn-icon" icon="mdi:wan" />
       </div>
+
+      <template v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN">
+        <NButton v-if="!sortEditMode" quaternary class="float-btn" :disabled="itemCardsLoading" :aria-label="t('common.edit')" :title="t('common.edit')" @click="enterSortEditMode">
+          <SvgIcon class="text-white float-btn-icon" icon="mdi:pencil" />
+        </NButton>
+        <template v-else>
+          <NButton quaternary class="float-btn" :loading="sortSaving" :aria-label="t('common.saveSort')" :title="t('common.saveSort')" @click="saveSortEditMode">
+            <SvgIcon class="text-white float-btn-icon" icon="mdi:check" />
+          </NButton>
+          <NButton quaternary class="float-btn" :disabled="sortSaving" :aria-label="t('common.cancel')" :title="t('common.cancel')" @click="cancelSortEditMode">
+            <SvgIcon class="text-white float-btn-icon" icon="mdi:close" />
+          </NButton>
+        </template>
+      </template>
 
       <!-- 账号管理器切换 -->
       <template
@@ -605,6 +733,16 @@ html {
 </style>
 
 <style scoped>
+.sort-empty-hint {
+  grid-column: 1 / -1;
+  min-height: 3rem;
+  padding: 0.75rem;
+  border: 1px dashed currentColor;
+  border-radius: 0.5rem;
+  color: white;
+  pointer-events: none;
+}
+
 .mask {
   position: absolute;
   top: 0;

@@ -34,6 +34,18 @@ type ItemIconSaveSortRequest struct {
 	ItemIconGroupId uint                               `json:"itemIconGroupId"`
 }
 
+// ItemIconSortBatchGroup 跨分组批量排序中的单个分组
+// 未出现在请求中的分组不会被修改；出现过的分组必须提交该组全部卡片，避免丢失卡片
+type ItemIconSortBatchGroup struct {
+	ItemIconGroupId uint   `json:"itemIconGroupId"`
+	ItemIds         []uint `json:"itemIds"`
+}
+
+// ItemIconSaveSortBatchRequest 跨分组原子批量排序请求
+type ItemIconSaveSortBatchRequest struct {
+	Groups []ItemIconSortBatchGroup `json:"groups"`
+}
+
 type ItemIconGetSiteFaviconReq struct {
 	Url string `json:"url"`
 }

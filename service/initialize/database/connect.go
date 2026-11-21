@@ -125,6 +125,9 @@ func CreateDatabase(driver string, db *gorm.DB) error {
 		&models.ItemIconGroup{},
 		&models.ModuleConfig{},
 		&models.OpenApiToken{},
+		// 二次认证（TOTP / Passkey）独立表，与旧表完全隔离
+		&models.SecurityTotp{},
+		&models.SecurityPasskey{},
 	)
 
 	return err

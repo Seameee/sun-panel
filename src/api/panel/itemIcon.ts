@@ -42,6 +42,10 @@ export function saveSort<T>(data: Panel.ItemIconSortRequest) {
   })
 }
 
+export function saveSortBatch(data: { groups: Panel.ItemIconGroupSortItem[] }) {
+  return post({ url: '/panel/itemIcon/saveSortBatch', data })
+}
+
 export function getSiteFavicon<T>(url: string) {
   return post<T>({
     url: '/panel/itemIcon/getSiteFavicon',

@@ -242,6 +242,46 @@ func (a *ItemIcon) SaveSort(c *gin.Context) {
 	apiReturn.Success(c)
 }
 
+// 跨分组原子批量保存排序（含卡片跨组移动）
+func (a *ItemIcon) SaveSortBatch(c *gin.Context) {
+	req := panelApiStructs.ItemIconSaveSortBatchRequest{}
+
+	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+		apiReturn.ErrorParamFomat(c, err.Error())
+		return
+	}
+
+	userInfo, _ := base.GetCurrentUserInfo(c)
+
+	groups := make([]biz.ItemSortGroup, 0, len(req.Groups))
+	for _, v := range req.Groups {
+		groups = append(groups, biz.ItemSortGroup{
+			ItemIconGroupId: v.ItemIconGroupId,
+			ItemIds:         v.ItemIds,
+		})
+	}
+
+	if err := biz.Item.SaveSortBatch(userInfo.ID, groups); err != nil {
+		switch {
+		case errors.Is(err, biz.ErrItemSortGroupNotOwned), errors.Is(err, biz.ErrItemSortItemNotOwned):
+			apiReturn.ErrorNoAccess(c)
+		case errors.Is(err, biz.ErrItemSortDataStale):
+			apiReturn.ErrorCode(c, apiReturn.ErrCodeParameterFormatError, err.Error(), nil)
+		case errors.Is(err, biz.ErrItemSortEmptyGroups),
+			errors.Is(err, biz.ErrItemSortInvalidGroup),
+			errors.Is(err, biz.ErrItemSortDuplicateGroup),
+			errors.Is(err, biz.ErrItemSortInvalidItem),
+			errors.Is(err, biz.ErrItemSortDuplicateItem):
+			apiReturn.ErrorCode(c, apiReturn.ErrCodeParameterFormatError, err.Error(), nil)
+		default:
+			apiReturn.ErrorDatabase(c, err.Error())
+		}
+		return
+	}
+
+	apiReturn.Success(c)
+}
+
 // 支持获取并直接下载对方网站图标到服务器[将被弃用] 2024年11月30日修改
 func (a *ItemIcon) GetSiteFavicon(c *gin.Context) {
 	userInfo, _ := base.GetCurrentUserInfo(c)

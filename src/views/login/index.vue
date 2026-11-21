@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { NButton, NCard, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useOsTheme } from 'naive-ui'
+import { NButton, NCard, NDivider, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useOsTheme } from 'naive-ui'
 import type { InputInst } from 'naive-ui'
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Captcha, SvgIcon } from '@/components/common'
 import { login } from '@/api'
+import { passkeyLoginBegin, passkeyLoginFinish } from '@/api/security'
 import { useAccountManagerStore, useAppStore, useAuthStore, usePanelState } from '@/store'
 import { router } from '@/router'
 import { t } from '@/locales'
@@ -12,6 +13,7 @@ import { languageOptions } from '@/utils/defaultData'
 import type { Language } from '@/store/modules/app/helper'
 import { getSiteStting } from '@/api/openness'
 import { apiRespErrMsg, setTitle } from '@/utils/cmn'
+import { classifyWebAuthnError, getWebAuthnSupport, serializeAssertionCredential, toRequestOptions } from '@/utils/webauthn'
 import { defaultSetting } from '@/store/modules/app/helper'
 
 const route = useRoute()
@@ -39,41 +41,127 @@ const form = ref<Login.LoginReqest>({
   username: defaultUsername.value,
   password: '',
 })
+const totpRequired = ref(false)
+const inputTotpRef = ref<InputInst | null>(null)
+const passkeyLoading = ref(false)
+const webAuthnSupport = getWebAuthnSupport()
+
+// 登录成功后的统一处理（密码登录与 Passkey 登录共用）
+function handleLoginSuccess(data: Login.LoginResponse) {
+  authStore.setToken(data.token)
+  authStore.setUserInfo(data)
+  panelState.reset() // 重置面板配置
+
+  // 添加到账号管理器
+  accountManagerStore.addAccount({
+    username: data.username || form.value.username,
+    name: data.name || '',
+    id: data.id || 0,
+    cToken: data.token,
+    loginStatus: true,
+  })
+
+  setTimeout(() => {
+    ms.success(`Hi ${data.name},${t('login.welcomeMessage')}`)
+    loading.value = false
+    passkeyLoading.value = false
+    router.push({ path: '/' })
+  }, 500)
+}
+
+function refreshCaptcha() {
+  if (siteSetting.value.isEnableLoginCaptcha)
+    captchaRef.value?.refresh()
+}
 
 const loginPost = async () => {
+  if (loading.value || passkeyLoading.value)
+    return
   loading.value = true
   try {
-    const res = await login<Login.LoginResponse>(form.value)
+    const payload: Login.LoginReqest = { ...form.value }
+    // 未进入动态码阶段时不提交该字段
+    if (!totpRequired.value)
+      delete payload.totpCode
+
+    const res = await login<Login.LoginResponse>(payload)
     if (res.code === 0) {
-      authStore.setToken(res.data.token)
-      authStore.setUserInfo(res.data)
-      panelState.reset() // 重置面板配置
-
-      // 添加到账号管理器
-      accountManagerStore.addAccount({
-        username: res.data.username || form.value.username,
-        name: res.data.name || '',
-        id: res.data.id || 0,
-        cToken: res.data.token,
-        loginStatus: true,
-      })
-
-      setTimeout(() => {
-        ms.success(`Hi ${res.data.name},${t('login.welcomeMessage')}`)
-        loading.value = false
-        router.push({ path: '/' })
-      }, 500)
+      handleLoginSuccess(res.data)
+      return
     }
-    else {
-      loading.value = false
-    }
+    loading.value = false
   }
   catch (error) {
-    if (appStore.siteSetting.isEnableLoginCaptcha)
-      captchaRef.value.refresh()
+    const code = (error as { code?: number } | null)?.code
 
+    // 密码正确但需要动态验证码（业务码 1101）
+    if (code === 1101) {
+      totpRequired.value = true
+      form.value.totpCode = ''
+      // 重试登录会重新校验图形验证码，需刷新
+      form.value.vcode = ''
+      refreshCaptcha()
+      nextTick(() => inputTotpRef.value?.focus())
+      ms.info(t('login.totpRequiredTip'))
+      loading.value = false
+      return
+    }
+
+    // 动态码错误或已被使用（业务码 1102）
+    if (code === 1102) {
+      form.value.totpCode = ''
+      form.value.vcode = ''
+      refreshCaptcha()
+      nextTick(() => {
+        if (totpRequired.value)
+          inputTotpRef.value?.focus()
+        else
+          inputpasswordRef.value?.focus()
+      })
+      ms.error(t('apiErrorCode.1102'))
+      loading.value = false
+      return
+    }
+
+    refreshCaptcha()
     apiRespErrMsg(error)
     loading.value = false
+  }
+}
+
+// Passkey 登录（discoverable，无需用户名）
+const passkeyLogin = async () => {
+  if (passkeyLoading.value || loading.value)
+    return
+  passkeyLoading.value = true
+  try {
+    const { data } = await passkeyLoginBegin<Security.PublicKeyFlowResponse>()
+    const options = toRequestOptions(data.publicKey)
+    const credential = await navigator.credentials.get({ publicKey: options }) as PublicKeyCredential | null
+    if (!credential) {
+      const emptyError = new Error('NotAllowedError')
+      emptyError.name = 'NotAllowedError'
+      throw emptyError
+    }
+    const { data: loginData } = await passkeyLoginFinish<Login.LoginResponse>(
+      data.flowId,
+      serializeAssertionCredential(credential),
+    )
+    handleLoginSuccess(loginData)
+  }
+  catch (error) {
+    passkeyLoading.value = false
+    if ((error as { code?: number } | null)?.code !== undefined) {
+      apiRespErrMsg(error)
+      return
+    }
+    const failure = classifyWebAuthnError(error)
+    if (failure === 'cancelled')
+      ms.warning(t('login.passkeyCancelled'))
+    else if (failure === 'unsupported')
+      ms.error(t('login.passkeyUnsupported'))
+    else
+      ms.error(t('common.unknownError'))
   }
 }
 
@@ -184,6 +272,18 @@ onMounted(() => {
             </NInput>
           </NFormItem>
 
+          <NFormItem v-if="totpRequired">
+            <NInput
+              ref="inputTotpRef" v-model:value="form.totpCode" type="text" :maxlength="6"
+              inputmode="numeric" :placeholder="t('login.totpCodePlaceholder')"
+              :aria-label="t('login.totpCodePlaceholder')"
+            >
+              <template #prefix>
+                <SvgIcon icon="mdi:shield-key-outline" />
+              </template>
+            </NInput>
+          </NFormItem>
+
           <NFormItem v-if="appStore.siteSetting.isEnableLoginCaptcha">
             <div class="w-[130px] h-[40px] mr-[20px] rounded border flex cursor-pointer">
               <Captcha ref="captchaRef" src="/api/captcha/getImage" />
@@ -196,14 +296,32 @@ onMounted(() => {
               {{ $t('login.loginButton') }}
             </NButton>
           </NFormItem>
-
-          <div class="copyright flex justify-center text-current">
-            Powered By <a
-              href="https://github.com/hslr-s/sun-panel" target="_blank"
-              class="ml-[5px]"
-            >Sun-Panel</a>
-          </div>
         </NForm>
+
+        <template v-if="webAuthnSupport !== 'unsupported'">
+          <NDivider style="margin: 4px 0 12px;">
+            {{ t('login.dividerOr') }}
+          </NDivider>
+          <NButton
+            class="login-button" :loading="passkeyLoading" :disabled="webAuthnSupport !== 'ok'"
+            @click="passkeyLogin"
+          >
+            <template #icon>
+              <SvgIcon icon="mdi:fingerprint" />
+            </template>
+            {{ t('login.passkeyLogin') }}
+          </NButton>
+          <div v-if="webAuthnSupport === 'insecure'" class="passkey-https-tip">
+            {{ t('login.passkeyNeedHttps') }}
+          </div>
+        </template>
+
+        <div class="copyright flex justify-center text-current">
+          Powered By <a
+            href="https://github.com/hslr-s/sun-panel" target="_blank"
+            class="ml-[5px]"
+          >Sun-Panel</a>
+        </div>
       </NCard>
     </div>
   </div>
@@ -272,5 +390,13 @@ onMounted(() => {
 
 .language-text-style{
  color: var(--n-text-color);
+}
+
+.passkey-https-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--n-text-color);
+  opacity: 0.65;
 }
 </style>
