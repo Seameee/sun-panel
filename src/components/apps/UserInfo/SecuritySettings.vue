@@ -2,7 +2,7 @@
 import { NButton, NCard, NDivider, NFlex, NInput, NSpin, NTag, useMessage } from 'naive-ui'
 import { computed, onMounted, ref } from 'vue'
 import { encode } from 'uqr'
-import { RoundCardModal, SvgIcon } from '@/components/common'
+import { RoundCardModal } from '@/components/common'
 import {
   getSecurityStatus,
   securityPasskeyBegin,
@@ -17,6 +17,7 @@ import { apiRespErrMsg } from '@/utils/request/apiMessage'
 import {
   classifyWebAuthnError,
   isWebAuthnError,
+  getWebAuthnSupport,
   serializeCreationCredential,
   toCreationOptions,
 } from '@/utils/webauthn'
@@ -24,7 +25,8 @@ import { t } from '@/locales'
 
 const ms = useMessage()
 
-const statusLoading = ref(false)
+const webAuthnSupport = getWebAuthnSupport()
+const statusLoading = ref(true)
 const status = ref<Security.StatusResponse>({
   totpEnabled: false,
   passkeys: [],
@@ -376,9 +378,8 @@ onMounted(() => {
 
     <!-- 动态口令 TOTP -->
     <div>
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-2">
-          <SvgIcon icon="mdi:shield-key-outline" style="width:18px;height:18px;" />
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
           <span class="font-bold">{{ t('apps.userInfo.security.totpTitle') }}</span>
           <NTag size="small" :type="status.totpEnabled ? 'success' : 'default'">
             {{ status.totpEnabled ? t('apps.userInfo.security.enabled') : t('apps.userInfo.security.disabled') }}
@@ -397,20 +398,22 @@ onMounted(() => {
 
     <!-- Passkey -->
     <div>
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-2">
-          <SvgIcon icon="mdi:fingerprint" style="width:18px;height:18px;" />
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
           <span class="font-bold">{{ t('apps.userInfo.security.passkeyTitle') }}</span>
           <NTag size="small" :type="status.passkeys.length > 0 ? 'success' : 'default'">
             {{ t('apps.userInfo.security.passkeyCount', { count: status.passkeys.length }) }}
           </NTag>
         </div>
-        <NButton size="small" text type="primary" :disabled="!status.passkeyAvailable" @click="openPasskeyCreate">
+        <NButton size="small" text type="primary" :disabled="statusLoading || !status.passkeyAvailable || webAuthnSupport !== 'ok'" @click="openPasskeyCreate">
           {{ t('apps.userInfo.security.passkeyAdd') }}
         </NButton>
       </div>
-      <div class="text-slate-500 text-xs mt-1">
-        {{ status.passkeyAvailable ? t('apps.userInfo.security.passkeyDesc') : t('apps.userInfo.security.passkeyUnavailable') }}
+      <div v-if="!statusLoading" class="text-slate-500 text-xs mt-1 break-words">
+        {{ webAuthnSupport === 'insecure' ? t('login.passkeyNeedHttps')
+          : webAuthnSupport === 'unsupported' ? t('login.passkeyUnsupported')
+          : status.passkeyAvailable ? t('apps.userInfo.security.passkeyDesc')
+          : t('apps.userInfo.security.passkeyUnconfigured') }}
       </div>
 
       <div v-if="status.passkeys.length > 0" class="mt-2">
@@ -469,7 +472,7 @@ onMounted(() => {
           <div class="text-slate-500 text-xs">
             {{ t('apps.userInfo.security.totpSecretLabel') }}
           </div>
-          <div class="flex items-center justify-between gap-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <code class="text-sm break-all">{{ totpEnable.secret }}</code>
             <NButton size="tiny" text type="primary" @click="copySecret">
               {{ t('apps.userInfo.security.copy') }}

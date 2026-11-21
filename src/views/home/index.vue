@@ -580,8 +580,20 @@ function handleAddItem(itemIconGroupId?: number) {
             </template>
           </NButton>
           <template v-else>
-            <NButton color="#2a2a2a6b" :loading="sortSaving" :aria-label="t('common.saveSort')" :title="t('common.saveSort')" @click="saveSortEditMode">✓</NButton>
-            <NButton color="#2a2a2a6b" :disabled="sortSaving" :aria-label="t('common.cancel')" :title="t('common.cancel')" @click="cancelSortEditMode">×</NButton>
+            <NButton color="#2a2a2a6b" :loading="sortSaving" :aria-label="t('common.saveSort')" :title="t('common.saveSort')" @click="saveSortEditMode">
+              <template #icon>
+                <svg class="text-white font-xl" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m5 12 4 4L19 6" />
+                </svg>
+              </template>
+            </NButton>
+            <NButton color="#2a2a2a6b" :disabled="sortSaving" :aria-label="t('common.cancel')" :title="t('common.cancel')" @click="cancelSortEditMode">
+              <template #icon>
+                <svg class="text-white font-xl" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m6 6 12 12M18 6 6 18" />
+                </svg>
+              </template>
+            </NButton>
           </template>
         </template>
         <!-- 网络模式切换按钮组 -->

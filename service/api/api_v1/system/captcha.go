@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"sun-panel/api/api_v1/common/apiReturn"
+	"sun-panel/biz"
 	"sun-panel/global"
 	"sun-panel/lib/captcha"
 	"sun-panel/lib/cmn/systemSetting"
@@ -25,7 +26,10 @@ func captchaEnabled() bool {
 
 func (LoginApi) Options(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	apiReturn.SuccessData(c, gin.H{"captchaEnabled": captchaEnabled()})
+	apiReturn.SuccessData(c, gin.H{
+		"captchaEnabled":   captchaEnabled(),
+		"passkeyAvailable": biz.Security.Config().PasskeyAvailable(),
+	})
 }
 
 func (CaptchaApi) GetImage(c *gin.Context) {

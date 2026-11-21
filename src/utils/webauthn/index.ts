@@ -13,10 +13,10 @@ export type WebAuthnFailure = 'cancelled' | 'exists' | 'unsupported' | 'unknown'
 export function getWebAuthnSupport(): WebAuthnSupport {
   if (typeof window === 'undefined' || typeof navigator === 'undefined')
     return 'unsupported'
-  if (typeof window.PublicKeyCredential === 'undefined' || !navigator.credentials)
-    return 'unsupported'
   if (!window.isSecureContext)
     return 'insecure'
+  if (typeof window.PublicKeyCredential === 'undefined' || !navigator.credentials)
+    return 'unsupported'
   return 'ok'
 }
 

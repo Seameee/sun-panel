@@ -2,6 +2,14 @@
 
 Sun-Panel 是一个自托管导航面板，可以分组管理网站和服务，为同一张卡片设置内外网地址，也可以用作浏览器首页。这个分支以官方 [v1.3.0](https://github.com/hslr-s/sun-panel/tree/v1.3.0)（`31fd128`）为基础，沿用 [MIT 许可](LICENSE)。
 
+## v1.3.1-preview.3
+
+- 右下角排序的确认和取消按钮采用与工具栏一致的白色图标。
+- 账号安全卡片在应用面板内滚动。Passkey 入口会提示站点配置、HTTPS 或浏览器支持问题。
+- 登录表单支持密码管理器识别用户名、密码和一次性验证码。在密码管理器中为该站点保存 TOTP 后，面板要求验证码时可调用管理器自动填充。
+
+问题和建议可提交到 [GitHub Issues](https://github.com/Seameee/sun-panel/issues)。
+
 ## v1.3.1-preview.2
 
 - 在「个人信息 → 账号安全」绑定动态口令（TOTP）或通行密钥（Passkey）。开启 TOTP 后，密码登录需要输入验证器中的动态口令。已注册的通行密钥可以直接登录。
@@ -22,7 +30,7 @@ docker compose up -d
 docker compose exec sun-panel /app/sun-panel -password-reset
 ```
 
-从 HTTPS 访问面板时，在 `conf/conf.ini` 加入下面的配置并重启容器。`webauthn_origins` 填浏览器地址栏里的来源，使用非默认端口时也写上端口。注册后请保持 `webauthn_rp_id` 稳定。
+从 HTTPS 访问面板时，在 `conf/conf.ini` 加入下面的配置并重启容器。`webauthn_origins` 填浏览器地址栏里的来源，使用非默认端口时也写上端口。有效的 HTTPS 证书和这两项配置都是启用 Passkey 的条件。注册后请保持 `webauthn_rp_id` 稳定。
 
 ```ini
 [security]

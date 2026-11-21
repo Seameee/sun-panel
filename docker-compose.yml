@@ -1,6 +1,6 @@
 services:
   sun-panel:
-    image: ghcr.io/seameee/sun-panel:v1.3.1-preview.2
+    image: ghcr.io/seameee/sun-panel:v1.3.1-preview.3
     container_name: sun-panel
     environment:
       - SUN_PANEL_INITIAL_PASSWORD

@@ -25,7 +25,7 @@ const screenWidth = ref(0)
 const isSmallScreen = ref(false)
 const defaultTitle = t('appLauncher.title')
 const title = ref('')
-const height = ref('500px')
+const height = 'min(500px, 68dvh)'
 
 const apps = ref<App[]>([
   {
@@ -172,9 +172,9 @@ onUnmounted(() => {
                 </div>
               </div>
             </NLayoutSider>
-            <NLayoutContent :content-style="{ height }">
-              <div class="rounded-2xl h-full overflow-auto transition-all duration-500 min-w-[300px] h-full" :class="(isSmallScreen && !collapsed) ? 'opacity-0' : 'opacity-100'">
-                <AppLoader :component-name="componentName" class="h-full" />
+            <NLayoutContent style="min-width: 0;" :content-style="{ height, overflow: 'hidden' }">
+              <div class="rounded-2xl h-full min-w-0 overflow-y-auto overflow-x-hidden transition-opacity duration-500" :class="(isSmallScreen && !collapsed) ? 'opacity-0' : 'opacity-100'">
+                <AppLoader :component-name="componentName" class="min-h-full" />
               </div>
             </NLayoutContent>
           </NLayout>

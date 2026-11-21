@@ -44,14 +44,9 @@
   },
   "apps": {
     "about": {
-      "QQGroup": "QQ Group:",
-      "QR": "QR Code(recommend)",
-      "addQQGroupUrl": "Click to join",
       "appName": "About",
       "author": "Author:",
       "checkUpdate": "Check for new version",
-      "discussions": "Discussions:",
-      "donate": "☕Donate",
       "frontVersionText": "Front-end version number",
       "issue": "Feedback:",
       "viewUpdateLog": "Click here to view update log"
@@ -155,7 +150,7 @@
         "passkeyName": "Name",
         "passkeyNamePlaceholder": "e.g. My laptop",
         "passkeyTitle": "Passkey sign-in",
-        "passkeyUnavailable": "Passkeys are not available in this browser or environment (requires HTTPS and WebAuthn support)",
+        "passkeyUnconfigured": "Passkeys are not configured for this site. Ask the administrator to set the WebAuthn RP ID and HTTPS origin.",
         "passkeyWaiting": "Complete the verification in the system dialog…",
         "passwordRequired": "Please enter your current password",
         "title": "Account security",

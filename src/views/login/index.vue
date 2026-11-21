@@ -34,6 +34,8 @@ const isDark = computed(() => {
 })
 const languageValue = ref<Language>(appStore.language)
 const captchaEnabled = ref(false)
+const passkeyConfigured = ref(false)
+const loginOptionsLoaded = ref(false)
 const captchaRef = ref()
 
 const form = ref<Login.LoginReqest>({
@@ -44,7 +46,7 @@ const totpRequired = ref(false)
 const passwordChangeToken = ref('')
 const mustChangePassword = computed(() => passwordChangeToken.value !== '')
 const newPassword = ref('')
-const inputTotpRef = ref<InputInst | null>(null)
+const inputTotpRef = ref<HTMLInputElement | null>(null)
 const passkeyLoading = ref(false)
 const webAuthnSupport = getWebAuthnSupport()
 
@@ -145,6 +147,8 @@ const loginPost = async () => {
     // 动态码错误或已被使用（业务码 1102）
     if (code === 1102) {
       form.value.totpCode = ''
+      if (inputTotpRef.value)
+        inputTotpRef.value.value = ''
       form.value.vcode = ''
       refreshCaptcha()
       nextTick(() => {
@@ -201,17 +205,21 @@ const passkeyLogin = async () => {
   }
 }
 
-function handleEnterDown(e: any) {
-  // 修复Mac safari浏览器中文输入法回车触发
-  if (e.keyCode === 229)
+function handleSubmit(event: Event) {
+  event.preventDefault()
+  const target = event.currentTarget
+  if (!(target instanceof HTMLFormElement))
     return
-  if (e.key === 'Enter' && !e.isComposing) {
-    // 点击登录按钮触发
-    if (mustChangePassword.value)
-      changeDefaultPassword()
-    else
-      loginPost()
+  const fields = new FormData(target)
+  form.value.password = String(fields.get('password') ?? '')
+  if (mustChangePassword.value) {
+    newPassword.value = String(fields.get('new-password') ?? '')
+    void changeDefaultPassword()
+    return
   }
+  form.value.username = String(fields.get('username') ?? '')
+  form.value.totpCode = String(fields.get('otp') ?? '')
+  void loginPost()
 }
 
 function handleChangeLanuage(value: Language) {
@@ -222,8 +230,10 @@ function handleChangeLanuage(value: Language) {
 
 async function getConfig() {
   try {
-    const { data } = await get<{ captchaEnabled: boolean }>({ url: '/login/options' })
+    const { data } = await get<{ captchaEnabled: boolean; passkeyAvailable: boolean }>({ url: '/login/options' })
     captchaEnabled.value = data.captchaEnabled
+    passkeyConfigured.value = data.passkeyAvailable
+    loginOptionsLoaded.value = true
   }
   catch (error) {
     reportLoginError(error)
@@ -285,22 +295,22 @@ onMounted(() => {
           Sun-Panel
           <!-- </NGradientText> -->
         </div>
-        <NForm :model="form" label-width="100px" @keydown.enter="handleEnterDown">
+        <NForm :model="form" label-width="100px" :on-submit="handleSubmit">
           <template v-if="mustChangePassword">
             <p>{{ t('login.changeDefaultPassword') }}</p>
             <NFormItem>
-              <NInput v-model:value="form.password" type="password" :placeholder="t('settingUserInfo.oldPassword')" />
+              <NInput v-model:value="form.password" type="password" :input-props="{ name: 'password', autocomplete: 'current-password' }" :placeholder="t('settingUserInfo.oldPassword')" />
             </NFormItem>
             <NFormItem>
-              <NInput v-model:value="newPassword" type="password" :placeholder="t('login.newPassword')" />
+              <NInput v-model:value="newPassword" type="password" :input-props="{ name: 'new-password', autocomplete: 'new-password' }" :placeholder="t('login.newPassword')" />
             </NFormItem>
-            <NButton :loading="loading" class="login-button" @click="changeDefaultPassword">
+            <NButton :loading="loading" class="login-button" attr-type="submit">
               {{ t('login.savePassword') }}
             </NButton>
           </template>
           <template v-else>
           <NFormItem>
-            <NInput v-model:value="form.username" :placeholder="$t('login.usernamePlaceholder')">
+            <NInput v-model:value="form.username" :input-props="{ id: 'login-username', name: 'username', autocomplete: 'username' }" :placeholder="$t('login.usernamePlaceholder')">
               <template #prefix>
                 <SvgIcon icon="ph:user-bold" />
               </template>
@@ -308,7 +318,7 @@ onMounted(() => {
           </NFormItem>
 
           <NFormItem>
-            <NInput ref="inputpasswordRef" v-model:value="form.password" type="password" :placeholder="$t('login.passwordPlaceholder')">
+            <NInput ref="inputpasswordRef" v-model:value="form.password" type="password" :input-props="{ id: 'login-password', name: 'password', autocomplete: 'current-password' }" :placeholder="$t('login.passwordPlaceholder')">
               <template #prefix>
                 <SvgIcon icon="mdi:password-outline" />
               </template>
@@ -316,15 +326,11 @@ onMounted(() => {
           </NFormItem>
 
           <NFormItem v-if="totpRequired">
-            <NInput
-              ref="inputTotpRef" v-model:value="form.totpCode" type="text" :maxlength="6"
-              inputmode="numeric" :placeholder="t('login.totpCodePlaceholder')"
-              :aria-label="t('login.totpCodePlaceholder')"
+            <input
+              id="login-otp" ref="inputTotpRef" name="otp" type="text" class="login-otp"
+              maxlength="6" autocomplete="one-time-code" inputmode="numeric"
+              :aria-label="t('login.totpCodePlaceholder')" :placeholder="t('login.totpCodePlaceholder')"
             >
-              <template #prefix>
-                <SvgIcon icon="mdi:shield-key-outline" />
-              </template>
-            </NInput>
           </NFormItem>
 
           <NFormItem v-if="captchaEnabled">
@@ -335,7 +341,7 @@ onMounted(() => {
           </NFormItem>
 
           <NFormItem style="margin-top: 10px">
-            <NButton :loading="loading" class="login-button" @click="loginPost">
+            <NButton :loading="loading" class="login-button" attr-type="submit">
               {{ $t('login.loginButton') }}
             </NButton>
           </NFormItem>
@@ -347,7 +353,7 @@ onMounted(() => {
             {{ t('login.dividerOr') }}
           </NDivider>
           <NButton
-            v-if="!mustChangePassword" class="login-button" :loading="passkeyLoading" :disabled="webAuthnSupport !== 'ok'"
+            v-if="!mustChangePassword" class="login-button" :loading="passkeyLoading" :disabled="webAuthnSupport !== 'ok' || !passkeyConfigured"
             @click="passkeyLogin"
           >
             <template #icon>
@@ -358,11 +364,14 @@ onMounted(() => {
           <div v-if="webAuthnSupport === 'insecure'" class="passkey-https-tip">
             {{ t('login.passkeyNeedHttps') }}
           </div>
+          <div v-else-if="loginOptionsLoaded && !passkeyConfigured && !mustChangePassword" class="passkey-https-tip">
+            {{ t('apps.userInfo.security.passkeyUnconfigured') }}
+          </div>
         </template>
 
         <div class="copyright flex justify-center text-current">
           Powered By <a
-            href="https://github.com/hslr-s/sun-panel" target="_blank"
+            href="https://github.com/Seameee/sun-panel" target="_blank" rel="noopener noreferrer"
             class="ml-[5px]"
           >Sun-Panel</a>
         </div>
@@ -434,6 +443,25 @@ onMounted(() => {
 
 .language-text-style{
  color: var(--n-text-color);
+}
+
+.login-otp {
+  width: 100%;
+  height: 34px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 3px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.75);
+  color: inherit;
+}
+
+.dark .login-otp {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.login-otp:focus-visible {
+  outline: 2px solid var(--n-primary-color, #18a058);
+  outline-offset: 1px;
 }
 
 .passkey-https-tip {

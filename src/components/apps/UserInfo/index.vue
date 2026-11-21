@@ -141,7 +141,7 @@ function handleChangeTheme(value: Theme) {
 </script>
 
 <template>
-  <div class="bg-slate-200 dark:bg-zinc-900 p-2 h-full">
+  <div class="bg-slate-200 dark:bg-zinc-900 p-2 min-h-full min-w-0 flex flex-col gap-2">
     <NCard style="border-radius:10px" size="small">
       <div>
         <div class="text-slate-500 font-bold">
@@ -201,7 +201,7 @@ function handleChangeTheme(value: Theme) {
 
     <SecuritySettings />
 
-    <NCard style="border-radius:10px" class="mt-[10px]" size="small">
+    <NCard style="border-radius:10px" size="small">
       <NButton size="small" text type="error" @click="handleLogout">
         <template #icon>
           <SvgIcon icon="tabler:logout" />
